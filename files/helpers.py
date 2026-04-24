@@ -1,7 +1,7 @@
 """
 helpers.py
 ==========
-Summary statistics and Markov chain analysis helpers.
+Summary statistics and fill analysis helpers.
 Used by run_with_wrds.py and analysis.py.
 """
 
@@ -69,50 +69,114 @@ def summarise_order_stats(all_results: Dict) -> Tuple[pd.DataFrame, pd.DataFrame
 
 
 # ---------------------------------------------------------------------------
-# Markov Chain analysis (Section 4.2)
+# Fill analysis (replaces Markov chain from Section 4.2 of the paper)
+# ---------------------------------------------------------------------------
+#
+# WHY WE REPLACED THE MARKOV CHAIN:
+#
+# The paper's Markov chain analysis was designed for a *generative* simulator
+# where order arrivals were drawn from a Poisson process. In that setting,
+# transition probabilities like p(0,2) — both sides fill in one second — were
+# genuine forward-looking probabilities arising from the Poisson intensity,
+# and the formula p* = p(0,2) + sum p(0,1)*p(1,1)^n*p(1,2) made sense as an
+# analytic expression for the spread-capture probability under that model.
+#
+# With TAQ replay, fills are deterministic given the historical data: for a
+# specific day, our bid either got crossed by a real trade or it didn't. There
+# is no probability to estimate — only frequencies to count. Fitting a Markov
+# chain to these frequencies and then applying the geometric waiting-time
+# formula would give numbers that look like probabilities but aren't: the
+# underlying assumption of memoryless transitions is violated because real
+# market order flow has intraday patterns and serial correlation.
+#
+# We therefore replace the Markov chain with direct empirical statistics
+# computed from the fills list. These are honest about what the replay
+# simulation actually measures: observed rates over the specific week simulated,
+# not forward-looking probabilities for future trading days.
+#
+# The quantities reported are directly comparable to Tables 7 and 8 of the
+# paper as performance metrics — they just have a cleaner interpretation.
 # ---------------------------------------------------------------------------
 
-def markov_chain_analysis(result_days: List) -> Dict:
+def fill_analysis(result_days: List) -> Dict:
     """
-    Estimate Markov chain transition probabilities from simulation results.
+    Compute empirical fill statistics from replay simulation results.
 
-    States: 0=Quoting, 1=Waiting, 2=Spread (both sides filled)
+    All rates are computed per quote cycle, averaged across days.
 
-    p* = probability of capturing the spread per quote cycle
-    q* = probability of a one-sided fill (increases inventory risk)
+    Returns
+    -------
+    dict with:
+        spread_capture_rate : fraction of quote cycles where both sides filled
+        one_side_fill_rate  : fraction of quote cycles where only one side filled
+        no_fill_rate        : fraction of quote cycles with no fill at all
+        fills_per_quote     : average total fills per quote posted
+        avg_spread_captured : average spread earned on two-sided fills (dollars)
+        imbalance_ratio     : abs(buy_fills - sell_fills) / total_fills
+                              — measures how lopsided fills are; lower is better
+                              for inventory control
     """
-    daily_bid_fills = [sum(1 for f in d.fills if f.side == 'bid') for d in result_days]
-    daily_ask_fills = [sum(1 for f in d.fills if f.side == 'ask') for d in result_days]
-    daily_quotes    = [d.n_quotes for d in result_days]
+    daily_stats = []
 
-    p_spread = np.mean([
-        min(b, a) / max(q, 1)
-        for b, a, q in zip(daily_bid_fills, daily_ask_fills, daily_quotes)
-    ])
-    p_one_side = np.mean([
-        abs(b - a) / max(q, 1)
-        for b, a, q in zip(daily_bid_fills, daily_ask_fills, daily_quotes)
-    ])
+    for day in result_days:
+        n_quotes = max(day.n_quotes, 1)
+        bid_fills = [f for f in day.fills if f.side == 'bid']
+        ask_fills = [f for f in day.fills if f.side == 'ask']
+        n_bid = len(bid_fills)
+        n_ask = len(ask_fills)
+        total_fills = n_bid + n_ask
 
-    p_no_fill = max(0.0, 1.0 - p_spread - p_one_side)
-    p_1_2 = p_spread   * 0.3
-    p_1_0 = p_one_side * 0.5
-    p_1_1 = max(0.0, 1.0 - p_1_2 - p_1_0)
+        # Spread captured = both sides filled in the same quote cycle.
+        # Best approximation from aggregate data: min(bid_fills, ask_fills)
+        # counts the number of fully paired round-trips.
+        n_spread = min(n_bid, n_ask)
+        n_one_side = abs(n_bid - n_ask)
 
-    # p* = p(0,2) + sum_{n=0}^{5} p(0,1)*p(1,1)^n*p(1,2)
-    p_star = p_spread + sum(
-        p_one_side * (p_1_1 ** n) * p_1_2 for n in range(6)
-    )
-    # q* = p(0,1) + p(0,1)*p(1,1)^5*p(1,0)
-    q_star = p_one_side + p_one_side * (p_1_1 ** 5) * p_1_0
+        # Average spread earned per two-sided fill
+        if n_spread > 0 and len(bid_fills) > 0 and len(ask_fills) > 0:
+            avg_ask_price = np.mean([f.price for f in ask_fills])
+            avg_bid_price = np.mean([f.price for f in bid_fills])
+            avg_spread_earned = avg_ask_price - avg_bid_price
+        else:
+            avg_spread_earned = 0.0
+
+        # Imbalance: 0 means perfectly balanced, 1 means entirely one-sided
+        imbalance = abs(n_bid - n_ask) / max(total_fills, 1)
+
+        daily_stats.append({
+            'spread_capture_rate': n_spread    / n_quotes,
+            'one_side_fill_rate':  n_one_side  / n_quotes,
+            'no_fill_rate':        max(0.0, 1.0 - (n_spread + n_one_side) / n_quotes),
+            'fills_per_quote':     total_fills / n_quotes,
+            'avg_spread_captured': avg_spread_earned,
+            'imbalance_ratio':     imbalance,
+        })
 
     return {
-        'p(0,0)':                  round(p_no_fill,    4),
-        'p(0,1)':                  round(p_one_side,   4),
-        'p(0,2)':                  round(p_spread,     4),
-        'p(1,0)':                  round(p_1_0,        4),
-        'p(1,1)':                  round(p_1_1,        4),
-        'p(1,2)':                  round(p_1_2,        4),
-        'p_star (spread capture)': round(p_star * 100, 2),
-        'q_star (one-side fill)':  round(q_star * 100, 2),
+        k: round(float(np.mean([d[k] for d in daily_stats])), 4)
+        for k in daily_stats[0]
     }
+
+
+def print_fill_analysis(all_results: Dict) -> None:
+    """
+    Print fill analysis table for all tickers and both strategies.
+    Analogous to Tables 7 and 8 in the paper.
+    """
+    print(f"\n{'Ticker':<8} {'Strategy':<12} "
+          f"{'Spread Cap%':>11} {'One-Side%':>10} {'No Fill%':>9} "
+          f"{'Fills/Quote':>12} {'Avg Spread$':>12} {'Imbalance':>10}")
+    print("-" * 80)
+
+    for ticker, res in all_results.items():
+        for strat_key in ['optimal', 'baseline']:
+            stats = fill_analysis(res[strat_key])
+            print(
+                f"{ticker:<8} {strat_key.capitalize():<12} "
+                f"{stats['spread_capture_rate']*100:>10.1f}% "
+                f"{stats['one_side_fill_rate']*100:>9.1f}% "
+                f"{stats['no_fill_rate']*100:>8.1f}% "
+                f"{stats['fills_per_quote']:>12.3f} "
+                f"{stats['avg_spread_captured']:>11.4f}  "
+                f"{stats['imbalance_ratio']:>9.4f}"
+            )
