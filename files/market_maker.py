@@ -25,7 +25,9 @@ class AvellanedaStoikov:
     sigma : float
         Volatility of the mid-price (annualised or per-second, must match T units).
     kappa : float
-        Order-book depth parameter from the Poisson execution model lambda = A*exp(-kappa*delta).
+        Order-book depth parameter used in spread calibration via B = ln(1 + gamma/kappa).
+        Not used as a Poisson intensity parameter in this implementation — we use
+        real TAQ trades for fills instead.
     T : float
         Terminal time horizon (in the same units as t). Typically 1 trading day = 1.0.
     """
@@ -138,18 +140,14 @@ class InventoryModel:
     *keeps trading* but reduces order size in the direction of excess accumulation.
 
     Order size equations:
-        phi_bid(t) = phi_max * exp(-eta * q)   if q > 0  (long: reduce buy size)
-                   = phi_max                   if q <= 0
-        phi_ask(t) = phi_max * exp( eta * q)   if q < 0  (short: reduce sell size)  [note: q<0 so eta*q>0 shrinks]
-                   = phi_max                   if q >= 0
+        phi_bid = phi_max * exp(-eta * q)   if q > 0  (long: reduce buy size)
+               = phi_max                   if q <= 0
 
-    Wait — re-reading the paper carefully:
-        phi_bid = phi_max * exp(-eta*q)  if q > 0   (q>0 means long, reduce bids)
-        phi_bid = phi_max               if q < 0
-        phi_ask = phi_max * exp(-eta*|q|) = phi_max * exp(eta*q) if q < 0 (q<0 means short, reduce asks)
-        phi_ask = phi_max               if q > 0
+        phi_ask = phi_max * exp(eta * q)    if q < 0  (short: q<0 so eta*q<0, exp<1, reduces size)
+               = phi_max                   if q >= 0
 
-    With eta = 0.005 (positive), exp(-eta*q) < 1 when q > 0.
+    With eta = 0.005 (positive), exp(-eta*q) < 1 when q > 0, so bid size
+    shrinks as long inventory grows, and vice versa for asks.
 
     Parameters
     ----------
