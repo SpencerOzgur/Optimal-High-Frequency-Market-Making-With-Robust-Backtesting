@@ -27,7 +27,28 @@ import pandas as pd
 from dataclasses import dataclass
 from typing import List, Optional, Dict
 
-from simulator import SimulationResult, Fill   # reuse data structures
+
+@dataclass
+class Fill:
+    side: str
+    price: float
+    filled_size: float
+    time: float
+
+@dataclass
+class SimulationResult:
+    times: np.ndarray
+    mid_prices: np.ndarray
+    pnl: np.ndarray
+    inventory: np.ndarray
+    bid_prices: np.ndarray
+    ask_prices: np.ndarray
+    fills: List[Fill]
+    n_buy_orders: int
+    n_sell_orders: int
+    shares_bought: float
+    shares_sold: float
+    n_quotes: int
 
 
 # ---------------------------------------------------------------------------
