@@ -250,21 +250,14 @@ class WRDSLoader:
         best_ask = q_resampled['ask'].values.astype(float)
         mid      = (best_bid + best_ask) / 2.0
 
-        # ---- Sigma: realised vol from 1-second trade mid prices ----
+        # ---- Sigma: realised vol from 1-second trade prices ----
         trades_copy = trades.copy()
         trades_copy['timestamp'] = pd.to_datetime(
             date + ' ' + trades_copy['time_m'].astype(str)
         )
         trades_copy = trades_copy.set_index('timestamp').sort_index()
 
-        # VWAP price per second
-        def vwap(group):
-            if len(group) == 0:
-                return np.nan
-            return (group['price'] * group['size']).sum() / group['size'].sum()
-
         trade_prices = trades_copy.resample('1s')['price'].last()
-        trade_prices = trade_prices.reindex(second_index).ffill().bfill()
         log_returns  = np.diff(np.log(trade_prices.values))
         sigma        = float(np.std(log_returns[np.isfinite(log_returns)]))
 
@@ -310,12 +303,13 @@ def estimate_sigma(market_data: dict) -> float:
 def estimate_bathtub_profile(market_data_all_days: List[dict],
                               n_bins: int = 30) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Estimate the empirical intraday volume profile (replaces hardcoded bathtub).
+    Estimate the empirical intraday volume profile from TAQ trade data.
 
     Aggregates trade volume across all provided days into n_bins time buckets.
     Returns (bin_centres_seconds, normalised_volume_profile).
 
-    You can plug this into the Poisson intensity as a non-parametric alpha_t.
+    Useful for visualising intraday activity patterns or as an input
+    to any future extension that requires a time-varying intensity model.
     """
     all_t_sec = []
     all_sizes = []
