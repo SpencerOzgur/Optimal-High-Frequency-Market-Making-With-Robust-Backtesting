@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from wrds_loader import WRDSLoader, estimate_sigma
 from market_maker import AvellanedaStoikov, InventoryModel, BaselineStrategy
 from replay_simulator import ReplaySimulator
-from helpers import summarise_results, summarise_order_stats, markov_chain_analysis
+from helpers import summarise_results, summarise_order_stats, print_fill_analysis
 
 # ---------------------------------------------------------------------------
 # Configuration — matches the paper exactly
@@ -140,15 +140,8 @@ def run_wrds_experiment(tickers=TICKERS, dates=DATES):
     print("\n--- Table 5: Avg Orders/Shares/Quotes (Baseline) ---")
     print(t5.to_string(index=False))
 
-    print("\n--- Markov Chain: Spread Capture & One-Side Fill Probabilities ---")
-    print(f"{'Ticker':<8} {'Strategy':<12} {'p* spread%':>12} {'q* one-side%':>14}")
-    print("-" * 50)
-    for ticker, res in all_results.items():
-        for strat_key in ['optimal', 'baseline']:
-            mc = markov_chain_analysis(res[strat_key])
-            print(f"{ticker:<8} {strat_key.capitalize():<12} "
-                  f"{mc['p_star (spread capture)']:>11.1f}% "
-                  f"{mc['q_star (one-side fill)']:>13.1f}%")
+    print("\n--- Fill Analysis (replaces Markov chain — see helpers.py for rationale) ---")
+    print_fill_analysis(all_results)
 
     return all_results
 
