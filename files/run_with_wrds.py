@@ -35,13 +35,14 @@ DATES = [
     '2017-06-16',
 ]
 
-# Table 1 open/close spreads (used for A-S calibration)
-SPREAD_PARAMS = {
-    'AAPL': {'open_spread': 0.02, 'close_spread': 0.01, 'gamma': 0.001},
-    'AMZN': {'open_spread': 0.49, 'close_spread': 0.56, 'gamma': 0.0001},
-    'GE':   {'open_spread': 0.02, 'close_spread': 0.01, 'gamma': 0.001},
-    'IVV':  {'open_spread': 0.02, 'close_spread': 0.01, 'gamma': 0.001},
-    'M':    {'open_spread': 0.04, 'close_spread': 0.01, 'gamma': 0.001},
+# Remove SPREAD_PARAMS open/close spread entries entirely
+# Keep only gamma since that's a model parameter not a data parameter
+GAMMA_PARAMS = {
+    'AAPL': 0.001,
+    'AMZN': 0.0001,
+    'GE':   0.001,
+    'IVV':  0.001,
+    'M':    0.001,
 }
 
 PHI_MAX = 100.0
@@ -74,28 +75,32 @@ def run_wrds_experiment(tickers=TICKERS, dates=DATES):
     all_results = {}
 
     for ticker in tickers:
-        sp = SPREAD_PARAMS[ticker]
+        # Estimate spreads empirically from actual data
+        open_spreads = []
+        close_spreads = []
+        for d in dates:
+            if raw_data[ticker][d] is not None:
+                spreads = raw_data[ticker][d]['best_ask'] - raw_data[ticker][d]['best_bid']
+                open_spreads.append(float(np.nanmedian(spreads[:1800])))
+                close_spreads.append(float(np.nanmedian(spreads[-1800:])))
 
-        # Estimate sigma from actual trade data (average across days)
-        valid_days = [raw_data[ticker][d] for d in dates
-                      if raw_data[ticker][d] is not None]
-        if not valid_days:
-            print(f"  {ticker}: no valid data, skipping")
-            continue
+        open_spread = float(np.mean(open_spreads))
+        close_spread = float(np.mean(close_spreads))
+
+        print(f"  {ticker}: empirical open_spread={open_spread:.4f} close_spread={close_spread:.4f}")
 
         sigma = estimate_sigma({d: raw_data[ticker][d]
                                 for d in dates if raw_data[ticker][d]})
-        print(f"  {ticker}: estimated sigma = {sigma:.6f} per second")
 
-        # Build and calibrate A-S model
         as_model = AvellanedaStoikov(
-            gamma=sp['gamma'],
+            gamma=GAMMA_PARAMS[ticker],
             sigma=sigma,
             kappa=2.0,
             T=1.0
         )
-        as_model.calibrate_from_market(sp['open_spread'], sp['close_spread'])
-        as_model.gamma_sigma2 = as_model.gamma_sigma2 / 23400.0  # add this line
+        as_model.calibrate_from_market(open_spread, close_spread)
+        as_model.gamma_sigma2 = as_model.gamma_sigma2 / 23400.0
+
 
         baseline = BaselineStrategy()
 
