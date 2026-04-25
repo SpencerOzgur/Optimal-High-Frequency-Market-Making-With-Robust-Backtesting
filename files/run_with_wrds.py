@@ -95,6 +95,7 @@ def run_wrds_experiment(tickers=TICKERS, dates=DATES):
             T=1.0
         )
         as_model.calibrate_from_market(sp['open_spread'], sp['close_spread'])
+        as_model.gamma_sigma2 = as_model.gamma_sigma2 / 23400.0  # add this line
 
         baseline = BaselineStrategy()
 
