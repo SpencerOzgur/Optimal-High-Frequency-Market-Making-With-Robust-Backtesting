@@ -152,6 +152,6 @@ if __name__ == '__main__':
     # Optionally generate plots
     try:
         from analysis import plot_all
-        plot_all(results)
+        plot_all(results, subfolder='wrds')
     except Exception as e:
         print(f"\nPlotting skipped: {e}")
