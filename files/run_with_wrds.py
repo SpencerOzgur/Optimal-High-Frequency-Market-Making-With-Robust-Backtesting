@@ -37,11 +37,11 @@ DATES = [
 
 # Table 1 open/close spreads (used for A-S calibration)
 SPREAD_PARAMS = {
-    'AAPL': {'open_spread': 0.05,  'close_spread': 0.01, 'gamma': 0.1},
-    'AMZN': {'open_spread': 0.49,  'close_spread': 0.56, 'gamma': 0.01},
-    'GE':   {'open_spread': 0.04,  'close_spread': 0.01, 'gamma': 0.1},
-    'IVV':  {'open_spread': 0.03,  'close_spread': 0.01, 'gamma': 0.1},
-    'M':    {'open_spread': 0.09,  'close_spread': 0.01, 'gamma': 0.1},
+    'AAPL': {'open_spread': 0.02, 'close_spread': 0.01, 'gamma': 0.001},
+    'AMZN': {'open_spread': 0.49, 'close_spread': 0.56, 'gamma': 0.0001},
+    'GE':   {'open_spread': 0.02, 'close_spread': 0.01, 'gamma': 0.001},
+    'IVV':  {'open_spread': 0.02, 'close_spread': 0.01, 'gamma': 0.001},
+    'M':    {'open_spread': 0.04, 'close_spread': 0.01, 'gamma': 0.001},
 }
 
 PHI_MAX = 100.0

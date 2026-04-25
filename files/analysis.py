@@ -21,6 +21,24 @@ from market_maker import AvellanedaStoikov, InventoryModel
 
 T_SECONDS = 23400.0
 
+# Shared AM/PM tick positions and labels for intraday plots
+TIME_TICKS  = [9.5, 10.5, 11.5, 12.5, 13.5, 14.5, 15.5, 16.0]
+TIME_LABELS = ['9:30 AM', '10:30 AM', '11:30 AM', '12:30 PM',
+               '1:30 PM',  '2:30 PM',  '3:30 PM',  '4:00 PM']
+
+# Sparse version for small subplots (P&L panels in 2x2 grid)
+TIME_TICKS_SPARSE  = [9.5, 11.5, 13.5, 16.0]
+TIME_LABELS_SPARSE = ['9:30 AM', '11:30 AM', '1:30 PM', '4:00 PM']
+
+
+def _apply_time_axis(ax, sparse=False, rotation=30):
+    """Helper: apply AM/PM ticks to an intraday x-axis."""
+    ticks  = TIME_TICKS_SPARSE  if sparse else TIME_TICKS
+    labels = TIME_LABELS_SPARSE if sparse else TIME_LABELS
+    ax.set_xlabel('time')
+    ax.set_xticks(ticks)
+    ax.set_xticklabels(labels, rotation=rotation, ha='right', fontsize=8)
+
 
 def bathtub_alpha(t: float, T: float = T_SECONDS) -> float:
     """Piece-wise linear intraday volume profile (bathtub shape)."""
@@ -94,25 +112,26 @@ def plot_intensity_components(save=True):
     T = 23400.0
     t_arr = np.linspace(0, T, 500)
     alphas = [bathtub_alpha(t, T) for t in t_arr]
-    hours = t_arr / 3600 + 9.5   # convert to clock hour
+    hours = t_arr / 3600 + 9.5
 
     ax1.plot(hours, alphas, color='red', lw=2)
     ax1.axvline(9.5 + 2.0, color='gray', lw=0.8, linestyle='--')
     ax1.axvline(9.5 + 4.5, color='gray', lw=0.8, linestyle='--')
-    ax1.set_xlabel('time')
     ax1.set_ylabel('Fill probability at best price')
     ax1.set_xticks([9.5, 11.5, 14.0, 16.0])
-    ax1.set_xticklabels(['9:30am', '11:30am', '2:00pm', '4:00pm'])
-    ax1.text(10.2, 0.065, 'Begining', fontsize=8, color='gray')
-    ax1.text(12.2, 0.025, 'Middle',   fontsize=8, color='gray')
-    ax1.text(14.5, 0.055, 'End',      fontsize=8, color='gray')
+    ax1.set_xticklabels(['9:30 AM', '11:30 AM', '2:00 PM', '4:00 PM'],
+                         rotation=20, ha='right', fontsize=8)
+    ax1.set_xlabel('time')
+    ax1.text(10.2, 0.065, 'Beginning', fontsize=8, color='gray')
+    ax1.text(12.2, 0.025, 'Middle',    fontsize=8, color='gray')
+    ax1.text(14.5, 0.055, 'End',       fontsize=8, color='gray')
     ax1.set_title('(a) Time component $\\alpha_t$')
 
     # Right: depth component
     xi_arr = np.linspace(-0.10, 0.20, 500)
     mu = 100.0
     intensity = np.exp(-mu * xi_arr)
-    intensity[xi_arr < 0] = intensity[xi_arr < 0]   # inside spread: > 1
+    intensity[xi_arr < 0] = intensity[xi_arr < 0]
 
     ax2.plot(xi_arr, np.clip(intensity, 0, 1.5), color='red', lw=2)
     ax2.axvline(0, color='gray', lw=0.8, linestyle='--')
@@ -158,11 +177,11 @@ def plot_spreads(ticker: str, as_model: AvellanedaStoikov,
             alpha=0.6, label='Market Spread')
     ax.plot(t_hours, optimal_spread, color='red',       lw=1.5,
             label='Optimal Spread')
-    ax.set_xlabel('time (second)')
     ax.set_ylabel('dollar')
     ax.set_title(f'{ticker}: Market vs Optimal Spread')
     ax.legend(fontsize=9)
     ax.set_xlim(9.5, 16.0)
+    _apply_time_axis(ax, sparse=False, rotation=30)
     plt.tight_layout()
     if save:
         path = os.path.join(RESULTS_DIR, f'fig3_spreads_{ticker}.png')
@@ -196,11 +215,9 @@ def plot_pnl_and_inventory(ticker: str,
         label = DAY_LABELS[i] if i < len(DAY_LABELS) else f'Day {i+1}'
         c = COLORS[i % len(COLORS)]
 
-        # P&L
         ax_pnl_opt.plot(t_hours,  res_o.pnl, color=c, lw=0.8, label=label)
         ax_pnl_base.plot(t_hours, res_b.pnl, color=c, lw=0.8, label=label)
 
-        # Inventory density (KDE approximation via histogram)
         bins = np.linspace(-800, 800, 80)
         ax_inv_opt.hist(res_o.inventory,  bins=bins, density=True,
                          histtype='step', color=c, lw=1.2, label=label)
@@ -217,9 +234,9 @@ def plot_pnl_and_inventory(ticker: str,
         ax.legend(fontsize=7, loc='best')
 
     for ax in [ax_pnl_opt, ax_pnl_base]:
-        ax.set_xlabel('time (second)')
         ax.set_ylabel('dollar')
         ax.set_xlim(9.5, 16.0)
+        _apply_time_axis(ax, sparse=True, rotation=20)
 
     for ax in [ax_inv_opt, ax_inv_base]:
         ax.set_xlabel('position')
@@ -252,6 +269,5 @@ def plot_all(all_results: dict, save=True):
 
 
 if __name__ == '__main__':
-    # Run via run_with_wrds.py which calls plot_all(results) automatically.
     plot_order_size_function()
     plot_intensity_components()

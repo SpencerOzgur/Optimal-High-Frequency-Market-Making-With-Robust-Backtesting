@@ -39,27 +39,13 @@ class AvellanedaStoikov:
         self.T = T
 
     def indifference_price(self, s: float, q: float, t: float) -> float:
-        """
-        Reservation (indifference) price — the mid-price adjusted for inventory risk.
-
-            r(s, t) = s - q * gamma * sigma^2 * (T - t)
-
-        When q > 0 (long inventory), r < s: the MM shades prices down to sell.
-        When q < 0 (short inventory), r > s: the MM shades prices up to buy.
-        """
-        return s - q * self.gamma * self.sigma**2 * (self.T - t)
+        gs2 = getattr(self, 'gamma_sigma2', self.gamma * self.sigma ** 2)
+        return s - q * gs2 * (self.T - t)
 
     def optimal_spread(self, t: float) -> float:
-        """
-        Total optimal bid-ask spread around the indifference price.
-
-            delta_a + delta_b = gamma * sigma^2 * (T - t) + ln(1 + gamma/kappa)
-
-        This is a *linearly decreasing* function of time (when gamma > 0),
-        so the MM becomes more aggressive near close to unwind inventory.
-        """
-        time_component = self.gamma * self.sigma**2 * (self.T - t)          # A*(T-t)
-        closing_spread = np.log(1 + self.gamma / self.kappa)                 # B
+        gs2 = getattr(self, 'gamma_sigma2', self.gamma * self.sigma ** 2)
+        time_component = gs2 * (self.T - t)
+        closing_spread = np.log(1 + self.gamma / self.kappa)
         return time_component + closing_spread
 
     def quotes(self, s: float, q: float, t: float):
@@ -124,8 +110,7 @@ class AvellanedaStoikov:
         """
         Quotes using calibrated parameters.
         """
-        r = s - q * self.gamma_sigma2 * (self.T - t) if hasattr(self, 'gamma_sigma2') \
-            else self.indifference_price(s, q, t)
+        r = self.indifference_price(s, q, t)
         half_spread = self.optimal_spread_calibrated(t) / 2.0
         bid_price = r - half_spread
         ask_price = r + half_spread
