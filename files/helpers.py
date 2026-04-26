@@ -303,3 +303,60 @@ def export_quote_position_xlsx(all_results: dict,
 
                 startrow += 10
     print(f"\nExported quote position to: {full_path}")
+
+
+def compute_quote_distance_stats(all_results: dict,
+                                 spread_params: dict) -> pd.DataFrame:
+    """
+    For each ticker and day, compute squared distance between
+    optimal quotes and the synthetic NBBO (best_bid/best_ask).
+
+    In the Poisson simulator, best_bid = mid - half_mkt_spread
+    and best_ask = mid + half_mkt_spread where mkt_spread decays
+    linearly from open_spread to close_spread.
+    """
+    T_SECONDS = 23400.0
+    rows = []
+
+    for ticker, res in all_results.items():
+        sp = spread_params[ticker]
+        open_spread = sp['open_spread']
+        close_spread = sp['close_spread']
+
+        for day_i, day_res in enumerate(res['optimal']):
+            bid_arr = day_res.bid_prices
+            ask_arr = day_res.ask_prices
+            mid_arr = day_res.mid_prices
+            n = len(mid_arr)
+
+            # Reconstruct synthetic NBBO at each second
+            t_norm_arr = np.arange(n) / T_SECONDS
+            mkt_spread = open_spread + (close_spread - open_spread) * t_norm_arr
+            best_bid = mid_arr - mkt_spread / 2.0
+            best_ask = mid_arr + mkt_spread / 2.0
+
+            # Only active seconds
+            active = ~np.isnan(bid_arr)
+
+            bid_dist_sq = np.where(active, (bid_arr - best_bid) ** 2, np.nan)
+            ask_dist_sq = np.where(active, (ask_arr - best_ask) ** 2, np.nan)
+
+            rows.append({
+                'Ticker': ticker,
+                'Day': day_i + 1,
+                'Active Seconds': int(active.sum()),
+                'Bid Mean Sq Dist': round(float(np.nanmean(bid_dist_sq)), 8),
+                'Ask Mean Sq Dist': round(float(np.nanmean(ask_dist_sq)), 8),
+                'Bid RMSE': round(float(np.sqrt(np.nanmean(bid_dist_sq))), 6),
+                'Ask RMSE': round(float(np.sqrt(np.nanmean(ask_dist_sq))), 6),
+                'Bid Max Dist': round(float(np.sqrt(np.nanmax(bid_dist_sq))), 6),
+                'Ask Max Dist': round(float(np.sqrt(np.nanmax(ask_dist_sq))), 6),
+                'Bid Pct Within Tick': round(float(
+                    np.nanmean(np.abs(bid_arr - best_bid)[active] <= 0.01)
+                ) * 100, 1),
+                'Ask Pct Within Tick': round(float(
+                    np.nanmean(np.abs(ask_arr - best_ask)[active] <= 0.01)
+                ) * 100, 1),
+            })
+
+    return pd.DataFrame(rows)

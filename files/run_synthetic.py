@@ -55,7 +55,7 @@ import argparse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from market_maker import AvellanedaStoikov, InventoryModel, BaselineStrategy
-from helpers import summarise_results, summarise_order_stats, print_fill_analysis
+from helpers import summarise_results, summarise_order_stats, print_fill_analysis, compute_quote_distance_stats
 from replay_simulator import SimulationResult, Fill
 
 # ---------------------------------------------------------------------------
@@ -502,4 +502,8 @@ if __name__ == '__main__':
                         help='Number of days to simulate (default 5, use 100 for full run)')
     args = parser.parse_args()
 
-    results = run_experiment(n_days=args.days)
+    all_results = run_experiment(n_days=args.days)
+
+    print("\n--- Quote Distance from NBBO ---")
+    dist_df = compute_quote_distance_stats(all_results, SPREAD_PARAMS)
+    print(dist_df.to_string(index=False))
