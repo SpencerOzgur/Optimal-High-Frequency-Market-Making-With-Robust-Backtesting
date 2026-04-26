@@ -11,6 +11,17 @@ import os
 from typing import Dict, List, Tuple
 
 
+# Strategy key -> display label, in the order rows should appear in tables.
+# Keys absent from a result dict are skipped, so legacy callers (e.g. the
+# synthetic runner that only stores 'optimal' / 'baseline') still work.
+STRATEGY_VARIANTS: List[Tuple[str, str]] = [
+    ('optimal',       'Optimal Front'),
+    ('optimal_back',  'Optimal Back'),
+    ('baseline',      'Baseline Front'),
+    ('baseline_back', 'Baseline Back'),
+]
+
+
 # ---------------------------------------------------------------------------
 # Table helpers
 # ---------------------------------------------------------------------------
@@ -24,20 +35,22 @@ def summarise_results(all_results: Dict) -> Tuple[pd.DataFrame, pd.DataFrame]:
     table3_rows = []
 
     for ticker, res in all_results.items():
-        for strategy_key in ['optimal', 'baseline']:
+        for strategy_key, label in STRATEGY_VARIANTS:
+            if strategy_key not in res:
+                continue
             days = res[strategy_key]
             terminal_pnl = [d.pnl[-1] for d in days]
             terminal_pos = [d.inventory[-1] for d in days]
 
             table2_rows.append({
                 'Ticker':       ticker,
-                'Strategy':     strategy_key.capitalize(),
+                'Strategy':     label,
                 'Avg P&L':      round(np.mean(terminal_pnl), 2),
                 'Avg Position': round(np.mean(terminal_pos), 2),
             })
             table3_rows.append({
                 'Ticker':    ticker,
-                'Strategy':  strategy_key.capitalize(),
+                'Strategy':  label,
                 'P&L Mean':  round(np.mean(terminal_pnl), 2),
                 'P&L Stdev': round(np.std(terminal_pnl),  2),
                 'Pos Mean':  round(np.mean(terminal_pos),  2),
@@ -50,21 +63,38 @@ def summarise_results(all_results: Dict) -> Tuple[pd.DataFrame, pd.DataFrame]:
 def summarise_order_stats(all_results: Dict) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Build Table 4 and Table 5: avg orders, shares, quotes per day.
+
+    Table 4 covers the optimal strategy under both queue models;
+    Table 5 covers the baseline strategy under both queue models.
     """
     rows_opt  = []
     rows_base = []
 
+    optimal_keys  = [k for k in ('optimal', 'optimal_back')
+                     if any(k in res for res in all_results.values())]
+    baseline_keys = [k for k in ('baseline', 'baseline_back')
+                     if any(k in res for res in all_results.values())]
+
+    label_for = dict(STRATEGY_VARIANTS)
+
+    def _emit(rows, ticker, label, days):
+        rows.append({
+            'Ticker':        ticker,
+            'Strategy':      label,
+            'Buy Orders':    round(np.mean([d.n_buy_orders  for d in days])),
+            'Sell Orders':   round(np.mean([d.n_sell_orders for d in days])),
+            'Shares Bought': round(np.mean([d.shares_bought for d in days])),
+            'Shares Sold':   round(np.mean([d.shares_sold   for d in days])),
+            'Quotes':        round(np.mean([d.n_quotes      for d in days])),
+        })
+
     for ticker, res in all_results.items():
-        for strategy_key, rows in [('optimal', rows_opt), ('baseline', rows_base)]:
-            days = res[strategy_key]
-            rows.append({
-                'Ticker':        ticker,
-                'Buy Orders':    round(np.mean([d.n_buy_orders  for d in days])),
-                'Sell Orders':   round(np.mean([d.n_sell_orders for d in days])),
-                'Shares Bought': round(np.mean([d.shares_bought for d in days])),
-                'Shares Sold':   round(np.mean([d.shares_sold   for d in days])),
-                'Quotes':        round(np.mean([d.n_quotes      for d in days])),
-            })
+        for k in optimal_keys:
+            if k in res:
+                _emit(rows_opt, ticker, label_for[k], res[k])
+        for k in baseline_keys:
+            if k in res:
+                _emit(rows_base, ticker, label_for[k], res[k])
 
     return pd.DataFrame(rows_opt), pd.DataFrame(rows_base)
 
@@ -161,19 +191,21 @@ def fill_analysis(result_days: List) -> Dict:
 
 def print_fill_analysis(all_results: Dict) -> None:
     """
-    Print fill analysis table for all tickers and both strategies.
-    Analogous to Tables 7 and 8 in the paper.
+    Print fill analysis table for all tickers under each (strategy, queue)
+    variant present in the results dict. Analogous to Tables 7 and 8.
     """
-    print(f"\n{'Ticker':<8} {'Strategy':<12} "
+    print(f"\n{'Ticker':<8} {'Strategy':<16} "
           f"{'Spread Cap%':>11} {'One-Side%':>10} {'No Fill%':>9} "
           f"{'Fills/Quote':>12} {'Avg Spread$':>12} {'Imbalance':>10}")
-    print("-" * 80)
+    print("-" * 84)
 
     for ticker, res in all_results.items():
-        for strat_key in ['optimal', 'baseline']:
+        for strat_key, label in STRATEGY_VARIANTS:
+            if strat_key not in res:
+                continue
             stats = fill_analysis(res[strat_key])
             print(
-                f"{ticker:<8} {strat_key.capitalize():<12} "
+                f"{ticker:<8} {label:<16} "
                 f"{stats['spread_capture_rate']*100:>10.1f}% "
                 f"{stats['one_side_fill_rate']*100:>9.1f}% "
                 f"{stats['no_fill_rate']*100:>8.1f}% "
@@ -202,13 +234,18 @@ def export_quote_position_xlsx(all_results: dict,
     full_path = os.path.join(base_dir, path)
     os.makedirs(os.path.dirname(full_path), exist_ok=True)
 
+    sheet_variants = [('optimal', ''), ('optimal_back', '_back')]
+
     with pd.ExcelWriter(full_path, engine='openpyxl') as writer:
         for ticker, res in all_results.items():
+          for strategy_key, sheet_suffix in sheet_variants:
+            if strategy_key not in res:
+                continue
 
             # Collect all day tables then write to one sheet
             all_day_frames = []
 
-            for day_i, day_res in enumerate(res['optimal']):
+            for day_i, day_res in enumerate(res[strategy_key]):
                 bid_arr = day_res.bid_prices
                 ask_arr = day_res.ask_prices
                 bb = best_bid_dict[ticker][day_i]
@@ -258,8 +295,8 @@ def export_quote_position_xlsx(all_results: dict,
                     'active': n_active,
                 })
 
-            # Write all days to one sheet per ticker
-            sheet = ticker
+            # Write all days to one sheet per (ticker, queue model)
+            sheet = f"{ticker}{sheet_suffix}"
             startrow = 0
 
             # Write to Excel manually so we can control layout

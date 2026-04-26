@@ -285,7 +285,9 @@ def plot_pnl_and_inventory(ticker: str,
 
 def plot_all(all_results: dict, save=True, subfolder='synthetic'):
     """
-    Generate all figures for all stocks.
+    Generate all figures for all stocks. When the results dict contains
+    queue-model variants (`optimal_back` / `baseline_back`), figures for
+    those are written to a parallel `<subfolder>_back/` directory.
 
     Parameters
     ----------
@@ -294,18 +296,29 @@ def plot_all(all_results: dict, save=True, subfolder='synthetic'):
     subfolder   : 'synthetic' (from poisson_simulator.py)
                   'wrds'      (from run_with_wrds.py)
     """
+    # The standalone reference figures (1, 2) are queue-model-independent —
+    # they live in the front-of-queue folder only.
     print(f"\nSaving plots to: plots/{subfolder}/")
     plot_order_size_function(save=save, subfolder=subfolder)
     plot_intensity_components(save=save, subfolder=subfolder)
 
-    for ticker, res in all_results.items():
-        print(f"\nPlotting {ticker}...")
-        plot_spreads(ticker, res['as_model'],
-                     res['optimal'], res['baseline'],
-                     save=save, subfolder=subfolder)
-        plot_pnl_and_inventory(ticker,
-                                res['optimal'], res['baseline'],
-                                save=save, subfolder=subfolder)
+    variants = [
+        ('optimal',      'baseline',      subfolder),
+        ('optimal_back', 'baseline_back', f"{subfolder}_back"),
+    ]
+
+    for opt_key, base_key, folder in variants:
+        if not all(opt_key in res and base_key in res for res in all_results.values()):
+            continue
+        print(f"\nSaving plots to: plots/{folder}/")
+        for ticker, res in all_results.items():
+            print(f"  Plotting {ticker} ({folder})...")
+            plot_spreads(ticker, res['as_model'],
+                         res[opt_key], res[base_key],
+                         save=save, subfolder=folder)
+            plot_pnl_and_inventory(ticker,
+                                    res[opt_key], res[base_key],
+                                    save=save, subfolder=folder)
 
 
 if __name__ == '__main__':

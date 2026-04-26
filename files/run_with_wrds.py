@@ -105,8 +105,10 @@ def run_wrds_experiment(tickers=TICKERS, dates=DATES):
 
         baseline = BaselineStrategy()
 
-        optimal_results  = []
-        baseline_results = []
+        optimal_front_results  = []
+        optimal_back_results   = []
+        baseline_front_results = []
+        baseline_back_results  = []
 
         for date in dates:
             day = raw_data[ticker][date]
@@ -116,17 +118,31 @@ def run_wrds_experiment(tickers=TICKERS, dates=DATES):
 
             print(f"    {ticker} {date}...", end=" ", flush=True)
 
-            res_opt = sim.run(as_model, day, inv_model, strategy_type='optimal')
-            res_base = sim.run(baseline, day, inv_model, strategy_type='baseline')
+            res_opt_front  = sim.run(as_model, day, inv_model,
+                                     strategy_type='optimal',  queue_model='front')
+            res_opt_back   = sim.run(as_model, day, inv_model,
+                                     strategy_type='optimal',  queue_model='back')
+            res_base_front = sim.run(baseline, day, inv_model,
+                                     strategy_type='baseline', queue_model='front')
+            res_base_back  = sim.run(baseline, day, inv_model,
+                                     strategy_type='baseline', queue_model='back')
 
-            optimal_results.append(res_opt)
-            baseline_results.append(res_base)
-            print(f"P&L opt={res_opt.pnl[-1]:,.0f}  base={res_base.pnl[-1]:,.0f}")
+            optimal_front_results.append(res_opt_front)
+            optimal_back_results.append(res_opt_back)
+            baseline_front_results.append(res_base_front)
+            baseline_back_results.append(res_base_back)
+
+            print(f"P&L opt(F)={res_opt_front.pnl[-1]:,.0f} "
+                  f"opt(B)={res_opt_back.pnl[-1]:,.0f} "
+                  f"base(F)={res_base_front.pnl[-1]:,.0f} "
+                  f"base(B)={res_base_back.pnl[-1]:,.0f}")
 
         all_results[ticker] = {
-            'optimal':  optimal_results,
-            'baseline': baseline_results,
-            'as_model': as_model,
+            'optimal':       optimal_front_results,
+            'optimal_back':  optimal_back_results,
+            'baseline':      baseline_front_results,
+            'baseline_back': baseline_back_results,
+            'as_model':      as_model,
         }
 
         best_bid_dict[ticker] = [

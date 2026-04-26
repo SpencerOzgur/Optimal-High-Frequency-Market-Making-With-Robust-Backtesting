@@ -9,6 +9,13 @@ Requires:
 WRDS TAQ tables used:
     taqmsec.ctm_YYYYMMDD  — Consolidated Trades (millisecond)
     taqmsec.cqm_YYYYMMDD  — Consolidated Quotes (millisecond)
+
+Trade filtering follows the addressable-flow universe documented in
+taq_fill_universe.md: a print is "addressable" iff it is uncorrected,
+on-exchange, regular-hours, and carries only the regular/ISO/auto-ex sale
+condition codes. This drops FINRA TRF (off-exchange) volume and the long
+tail of auction / contingent / late / odd-lot / extended-hours prints that
+could not have hit a lit displayed quote.
 """
 
 import numpy as np
@@ -29,10 +36,6 @@ except ImportError:
 MARKET_OPEN  = pd.Timestamp("09:30:00").time()
 MARKET_CLOSE = pd.Timestamp("16:00:00").time()
 T_SECONDS    = 23400.0
-
-BAD_TRADE_CONDITIONS = {
-    "Z", "T", "U", "L", "G", "W", "J", "K"
-}
 
 BAD_QUOTE_CONDITIONS = {"C", "U", "D", "B", "W", "X", "Y"}
 
@@ -176,11 +179,22 @@ class WRDSLoader:
         return df
 
     def _load_trades(self, ticker: str, date: str) -> pd.DataFrame:
+        """
+        Pull addressable-flow trades only — see taq_fill_universe.md.
+
+        SQL filter:
+          - tr_corr = '00'                   (uncorrected)
+          - ex     <> 'D'                    (drop FINRA TRF / off-exchange)
+          - 09:30 <= time_m < 16:00          (regular hours)
+          - tr_scond chars all in {' ','@','F','E'}  (regular / ISO / auto-ex only)
+            NULL tr_scond is treated as regular and passes.
+        """
         table = f"taqmsec.ctm_{date.replace('-', '')}"
 
         query = f"""
             SELECT
                 time_m,
+                ex,
                 price,
                 size,
                 tr_corr,
@@ -188,25 +202,19 @@ class WRDSLoader:
             FROM {table}
             WHERE sym_root = '{ticker}'
               AND date     = '{date}'
-              AND time_m BETWEEN '09:30:00' AND '16:00:00'
+              AND time_m  >= '09:30:00'
+              AND time_m  <  '16:00:00'
               AND price > 0
               AND size  > 0
               AND tr_corr = '00'
+              AND ex     <> 'D'
+              AND (tr_scond IS NULL OR tr_scond ~ '^[ @FE]{{0,4}}$')
         """
 
         df = self.db.raw_sql(query)
 
         if df.empty:
             return df
-
-        if "tr_scond" in df.columns:
-            mask = df["tr_scond"].apply(
-                lambda c: not any(
-                    ch in BAD_TRADE_CONDITIONS
-                    for ch in str(c).split()
-                ) if pd.notna(c) else True
-            )
-            df = df[mask]
 
         df = df.sort_values("time_m").reset_index(drop=True)
         return df
@@ -231,12 +239,27 @@ class WRDSLoader:
 
         quotes = quotes.set_index("timestamp").sort_index()
 
-        q_resampled = quotes[["bid", "ask"]].resample("1s").last()
+        size_cols = [c for c in ("bidsiz", "asksiz") if c in quotes.columns]
+        q_resampled = quotes[["bid", "ask"] + size_cols].resample("1s").last()
         q_resampled = q_resampled.reindex(second_index).ffill().bfill()
 
         best_bid = q_resampled["bid"].to_numpy(dtype=float)
         best_ask = q_resampled["ask"].to_numpy(dtype=float)
         mid = (best_bid + best_ask) / 2.0
+
+        # WRDS taqmsec quirk: cqm bidsiz/asksiz are reported in round lots
+        # (100-share units), while ctm trade `size` is in shares. Convert
+        # quote sizes to shares so queue_ahead is unit-consistent with prints.
+        ROUND_LOT = 100.0
+
+        if "bidsiz" in q_resampled.columns:
+            best_bid_size = q_resampled["bidsiz"].fillna(0).to_numpy(dtype=float) * ROUND_LOT
+        else:
+            best_bid_size = np.zeros_like(best_bid)
+        if "asksiz" in q_resampled.columns:
+            best_ask_size = q_resampled["asksiz"].fillna(0).to_numpy(dtype=float) * ROUND_LOT
+        else:
+            best_ask_size = np.zeros_like(best_ask)
 
         # ---- Trades -> clean tick data + sigma ----
         trades_copy = trades.copy()
@@ -276,6 +299,8 @@ class WRDSLoader:
             "mid": mid,
             "best_bid": best_bid,
             "best_ask": best_ask,
+            "best_bid_size": best_bid_size,
+            "best_ask_size": best_ask_size,
             "sigma": sigma,
             "market_trades": trades_copy,
         }
