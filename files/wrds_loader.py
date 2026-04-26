@@ -16,6 +16,8 @@ import pandas as pd
 from typing import Dict, List, Tuple
 import warnings
 
+pd.set_option("mode.copy_on_write", True)
+
 try:
     import wrds
     WRDS_AVAILABLE = True
