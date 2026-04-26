@@ -7,6 +7,7 @@ Used by run_with_wrds.py and analysis.py.
 
 import numpy as np
 import pandas as pd
+import os
 from typing import Dict, List, Tuple
 
 
@@ -180,3 +181,125 @@ def print_fill_analysis(all_results: Dict) -> None:
                 f"{stats['avg_spread_captured']:>11.4f}  "
                 f"{stats['imbalance_ratio']:>9.4f}"
             )
+
+
+def export_quote_position_xlsx(all_results: dict,
+                               best_bid_dict: dict,
+                               best_ask_dict: dict,
+                               path: str = 'sheets/quote_position.xlsx'):
+    """
+    Export quote position analysis to Excel.
+
+    Layout per ticker: 2x3 table
+    Rows:    Bid, Ask
+    Columns: Inside NBBO, At NBBO, Outside NBBO
+
+    One sheet per ticker, one table per day.
+    """
+    TICK = 0.001
+
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    full_path = os.path.join(base_dir, path)
+    os.makedirs(os.path.dirname(full_path), exist_ok=True)
+
+    with pd.ExcelWriter(full_path, engine='openpyxl') as writer:
+        for ticker, res in all_results.items():
+
+            # Collect all day tables then write to one sheet
+            all_day_frames = []
+
+            for day_i, day_res in enumerate(res['optimal']):
+                bid_arr = day_res.bid_prices
+                ask_arr = day_res.ask_prices
+                bb = best_bid_dict[ticker][day_i]
+                ba = best_ask_dict[ticker][day_i]
+
+                # Only seconds where we had active quotes
+                active = ~np.isnan(bid_arr)
+                n_active = int(active.sum())
+
+                # Bid counts
+                bid_inside = int(((bid_arr > bb + TICK) & active).sum())
+                bid_at = int(((np.abs(bid_arr - bb) <= TICK) & active).sum())
+                bid_outside = int(((bid_arr < bb - TICK) & active).sum())
+
+                # Ask counts
+                ask_inside = int(((ask_arr < ba - TICK) & active).sum())
+                ask_at = int(((np.abs(ask_arr - ba) <= TICK) & active).sum())
+                ask_outside = int(((ask_arr > ba + TICK) & active).sum())
+
+                # Build 2x3 count table
+                count_df = pd.DataFrame(
+                    {
+                        'Inside NBBO': [bid_inside, ask_inside],
+                        'At NBBO': [bid_at, ask_at],
+                        'Outside NBBO': [bid_outside, ask_outside],
+                    },
+                    index=['Bid', 'Ask']
+                )
+
+                # Build 2x3 percentage table
+                pct_df = pd.DataFrame(
+                    {
+                        'Inside NBBO': [round(bid_inside / max(n_active, 1) * 100, 1),
+                                        round(ask_inside / max(n_active, 1) * 100, 1)],
+                        'At NBBO': [round(bid_at / max(n_active, 1) * 100, 1),
+                                    round(ask_at / max(n_active, 1) * 100, 1)],
+                        'Outside NBBO': [round(bid_outside / max(n_active, 1) * 100, 1),
+                                         round(ask_outside / max(n_active, 1) * 100, 1)],
+                    },
+                    index=['Bid', 'Ask']
+                )
+
+                all_day_frames.append({
+                    'day': day_i + 1,
+                    'count': count_df,
+                    'pct': pct_df,
+                    'active': n_active,
+                })
+
+            # Write all days to one sheet per ticker
+            sheet = ticker
+            startrow = 0
+
+            # Write to Excel manually so we can control layout
+            workbook = writer.book
+            worksheet = workbook.create_sheet(title=sheet)
+
+            for d in all_day_frames:
+                # Day header
+                worksheet.cell(row=startrow + 1, column=1,
+                               value=f"Day {d['day']} — Active seconds: {d['active']}")
+
+                # Count table
+                worksheet.cell(row=startrow + 2, column=1, value='Counts')
+                worksheet.cell(row=startrow + 2, column=2, value='Inside NBBO')
+                worksheet.cell(row=startrow + 2, column=3, value='At NBBO')
+                worksheet.cell(row=startrow + 2, column=4, value='Outside NBBO')
+
+                for row_i, idx in enumerate(['Bid', 'Ask']):
+                    worksheet.cell(row=startrow + 3 + row_i, column=1, value=idx)
+                    worksheet.cell(row=startrow + 3 + row_i, column=2,
+                                   value=d['count'].loc[idx, 'Inside NBBO'])
+                    worksheet.cell(row=startrow + 3 + row_i, column=3,
+                                   value=d['count'].loc[idx, 'At NBBO'])
+                    worksheet.cell(row=startrow + 3 + row_i, column=4,
+                                   value=d['count'].loc[idx, 'Outside NBBO'])
+
+                # Percentage table
+                worksheet.cell(row=startrow + 6, column=1, value='Percentages (%)')
+                worksheet.cell(row=startrow + 6, column=2, value='Inside NBBO')
+                worksheet.cell(row=startrow + 6, column=3, value='At NBBO')
+                worksheet.cell(row=startrow + 6, column=4, value='Outside NBBO')
+
+                for row_i, idx in enumerate(['Bid', 'Ask']):
+                    worksheet.cell(row=startrow + 7 + row_i, column=1, value=idx)
+                    worksheet.cell(row=startrow + 7 + row_i, column=2,
+                                   value=d['pct'].loc[idx, 'Inside NBBO'])
+                    worksheet.cell(row=startrow + 7 + row_i, column=3,
+                                   value=d['pct'].loc[idx, 'At NBBO'])
+                    worksheet.cell(row=startrow + 7 + row_i, column=4,
+                                   value=d['pct'].loc[idx, 'Outside NBBO'])
+
+                startrow += 10
+    print(f"\nExported quote position to: {full_path}")

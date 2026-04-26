@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from wrds_loader import WRDSLoader, estimate_sigma
 from market_maker import AvellanedaStoikov, InventoryModel, BaselineStrategy
 from replay_simulator import ReplaySimulator
-from helpers import summarise_results, summarise_order_stats, print_fill_analysis
+from helpers import summarise_results, summarise_order_stats, print_fill_analysis, export_quote_position_xlsx
 
 # ---------------------------------------------------------------------------
 # Configuration — matches the paper exactly
@@ -35,7 +35,6 @@ DATES = [
     '2017-06-16',
 ]
 
-# Remove SPREAD_PARAMS open/close spread entries entirely
 # Keep only gamma since that's a model parameter not a data parameter
 GAMMA_PARAMS = {
     'AAPL': 0.001,
@@ -73,6 +72,8 @@ def run_wrds_experiment(tickers=TICKERS, dates=DATES):
     inv_model = InventoryModel(phi_max=PHI_MAX, eta=ETA)
 
     all_results = {}
+    best_bid_dict = {}
+    best_ask_dict = {}
 
     for ticker in tickers:
         # Estimate spreads empirically from actual data
@@ -128,6 +129,15 @@ def run_wrds_experiment(tickers=TICKERS, dates=DATES):
             'as_model': as_model,
         }
 
+        best_bid_dict[ticker] = [
+            raw_data[ticker][d]['best_bid']
+            for d in dates if raw_data[ticker][d] is not None
+        ]
+        best_ask_dict[ticker] = [
+            raw_data[ticker][d]['best_ask']
+            for d in dates if raw_data[ticker][d] is not None
+        ]
+
     # 3. Print summary tables
     print("\n" + "=" * 60)
     print("  Step 3: Results")
@@ -149,11 +159,11 @@ def run_wrds_experiment(tickers=TICKERS, dates=DATES):
     print("\n--- Fill Analysis (replaces Markov chain — see helpers.py for rationale) ---")
     print_fill_analysis(all_results)
 
-    return all_results
+    return all_results, best_bid_dict, best_ask_dict
 
 
 if __name__ == '__main__':
-    results = run_wrds_experiment()
+    results, best_bid_dict, best_ask_dict = run_wrds_experiment()
 
     # Optionally generate plots
     try:
@@ -161,3 +171,13 @@ if __name__ == '__main__':
         plot_all(results, subfolder='wrds')
     except Exception as e:
         print(f"\nPlotting skipped: {e}")
+
+    try:
+        export_quote_position_xlsx(
+            results,
+            best_bid_dict,
+            best_ask_dict,
+            path='sheets/quote_position.xlsx'
+        )
+    except Exception as e:
+        print(f"\nExport skipped: {e}")
