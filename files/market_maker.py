@@ -45,6 +45,7 @@ class AvellanedaStoikov:
     def optimal_spread(self, t: float) -> float:
         gs2 = getattr(self, 'gamma_sigma2', self.gamma * self.sigma ** 2)
         time_component = gs2 * (self.T - t)
+        # print(f'sigma: {self.sigma}, gamma: {self.gamma}, gs2: {gs2}, self.T: {self.T}, t {t}, time_component {time_component}')
         closing_spread = (2.0 / self.gamma) * np.log(1 + self.gamma / self.kappa)
         return time_component + closing_spread
 
@@ -98,20 +99,20 @@ class AvellanedaStoikov:
 
         return self.A, self.B
 
-    def optimal_spread_calibrated(self, t: float) -> float:
-        """
-        Spread using calibrated A and B (call calibrate_from_market first).
-        """
-        if hasattr(self, 'A'):
-            return self.A * (self.T - t) + self.B
-        return self.optimal_spread(t)
+    # def optimal_spread_calibrated(self, t: float) -> float:
+    #     """
+    #     Spread using calibrated A and B (call calibrate_from_market first).
+    #     """
+    #     if hasattr(self, 'A'):
+    #         return self.A * (self.T - t) + self.B
+    #     return self.optimal_spread(t)
 
     def quotes_calibrated(self, s: float, q: float, t: float):
         """
         Quotes using calibrated parameters.
         """
         r = self.indifference_price(s, q, t)
-        half_spread = self.optimal_spread_calibrated(t) / 2.0
+        half_spread = self.optimal_spread(t) / 2.0
         bid_price = r - half_spread
         ask_price = r + half_spread
         return bid_price, ask_price
