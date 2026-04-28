@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from wrds_loader import WRDSLoader, estimate_sigma
 from market_maker import AvellanedaStoikov, InventoryModel, BaselineStrategy
 from replay_simulator import ReplaySimulator
-from helpers import summarise_results, summarise_order_stats, print_fill_analysis, export_quote_position_xlsx
+from helpers import summarise_results, summarise_order_stats, print_fill_analysis, export_quote_position_xlsx, export_fill_stats_xlsx
 
 # ---------------------------------------------------------------------------
 # Configuration — matches the paper exactly
@@ -38,7 +38,7 @@ DATES = [
 # Keep only gamma since that's a model parameter not a data parameter
 GAMMA_PARAMS = {
     'AAPL': 0.001,
-    'AMZN': 0.0001,
+    'AMZN': 0.001,
     'GE':   0.001,
     'IVV':  0.001,
     'M':    0.001,
@@ -189,11 +189,23 @@ if __name__ == '__main__':
         print(f"\nPlotting skipped: {e}")
 
     try:
+        export_fill_stats_xlsx(
+            results,
+            best_bid_dict=best_bid_dict,
+            best_ask_dict=best_ask_dict,
+            path='sheets/fill_stats.xlsx'
+        )
+    except Exception as e:
+        print(f"\nFill stats export skipped: {e}")
+
+    try:
         export_quote_position_xlsx(
             results,
             best_bid_dict,
             best_ask_dict,
             path='sheets/quote_position.xlsx'
         )
+
+
     except Exception as e:
         print(f"\nExport skipped: {e}")
