@@ -37,11 +37,11 @@ DATES = [
 ]
 
 GAMMA_PARAMS = {
-    'AAPL': 0.001,
-    'AMZN': 0.001,
-    'GE':   0.001,
-    'IVV':  0.001,
-    'M':    0.001,
+    'AAPL': 0.1,
+    'AMZN': 0.1,
+    'GE':   0.1,
+    'IVV':  0.1,
+    'M':    0.1,
 }
 
 KAPPA_PARAMS = {

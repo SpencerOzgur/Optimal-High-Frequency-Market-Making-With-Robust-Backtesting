@@ -45,6 +45,7 @@ class AvellanedaStoikov:
     def optimal_spread(self, t: float) -> float:
         gs2 = getattr(self, 'gamma_sigma2', self.gamma * self.sigma ** 2)
         time_component = gs2 * (self.T - t)
+        # print(f'sigma: {self.sigma}, gamma: {self.gamma}, gs2: {gs2}, self.T: {self.T}, t {t}, time_component {time_component}')
         closing_spread = (2.0 / self.gamma) * np.log(1 + self.gamma / self.kappa)
         return time_component + closing_spread
 
