@@ -34,6 +34,10 @@ from dataclasses import dataclass
 from typing import List, Optional, Dict
 
 
+# Reg NMS Rule 612: stocks priced >= $1 must quote on the penny grid.
+TICK = 0.01
+
+
 @dataclass
 class Fill:
     side: str
@@ -77,11 +81,37 @@ class ReplaySimulator:
                  dt: float = 1.0,
                  T_seconds: float = 23400.0,
                  waiting_time: float = 5.0,
-                 update_time: float = 1.0):
+                 update_time: float = 1.0,
+                 a_intensity: float = 0.01,
+                 b_scale: float = 0.005,
+                 rng_seed: int = 42):
+        # ----------------------------------------------------------------
+        # Intra-spread Poisson-uplift fill model (Avellaneda-Stoikov flavour)
+        # ----------------------------------------------------------------
+        # When our quote is INSIDE the BBO, the historical-trade matching
+        # captures only flow that printed on the lit tape at the touch.
+        # Additional aggressors that would have come at our improved price
+        # (e.g. midpoint matches, hidden orders, price-improvement flow)
+        # are unobservable in TAQ, so we model them as a Poisson process
+        # whose intensity decays exponentially with depth from mid:
+        #
+        #     λ(ξ) = a_intensity * exp(-ξ / b_scale)
+        #
+        # `a_intensity` is the rate at the mid (fills/sec).  `b_scale`
+        # controls how fast the rate falls off as you post deeper.
+        # Defaults are placeholders — tune per ticker via run() kwargs.
+        # ----------------------------------------------------------------
         self.dt           = dt
         self.T_seconds    = T_seconds
         self.waiting_time = waiting_time
         self.update_time  = update_time
+        self.a_intensity  = a_intensity
+        self.b_scale      = b_scale
+        self.rng_seed     = rng_seed
+        # rng is re-seeded at the start of each run() so that comparisons
+        # across (strategy, queue_model) combinations on the same day use
+        # the same Poisson-event sequence (common random numbers).
+        self.rng          = np.random.default_rng(rng_seed)
 
     @staticmethod
     def _initial_queue_ahead(our_price: float, best_price: float,
@@ -108,6 +138,91 @@ class ReplaySimulator:
         if joined:
             return float(best_size) if best_size and not math.isnan(best_size) else 0.0
         return math.inf
+
+    def _poisson_uplift_fill(self,
+                              our_price: float,
+                              our_size: float,
+                              mid: float,
+                              best_price: float,
+                              side: str,
+                              a_intensity: float,
+                              b_scale: float,
+                              dt: float,
+                              rng: np.random.Generator) -> tuple:
+        """
+        Theoretical fill uplift for orders posted INSIDE the BBO.
+
+        ----------------------------------------------------------------
+        Math
+        ----------------------------------------------------------------
+        Avellaneda-Stoikov-style intensity for marketable orders that
+        would consume a quote posted at depth ξ from the mid:
+
+            λ(ξ) = a_intensity * exp(-ξ / b_scale)
+
+        Quotes AT or WORSE than the touch already capture the historical
+        observable flow via the standard `_check_*_fill` matching.  We
+        therefore add only the INCREMENTAL component that is invisible
+        in TAQ — the extra arrivals that would have come had we posted
+        tighter than the displayed best:
+
+            Δλ = λ(ξ_our) - λ(ξ_best)
+               = a_intensity * [exp(-ξ_our/b) - exp(-ξ_best/b)]
+
+        Δλ > 0 iff ξ_our < ξ_best, i.e. our quote sits closer to mid
+        than the touch (= strictly inside the BBO).  In every other
+        regime we return no uplift.
+
+        A Poisson(Δλ * dt) draw decides whether ≥ 1 incremental
+        aggressor arrives in this 1-second bin.  On fire we book a
+        full-size fill at our quoted price (binary-fill convention from
+        the AS derivation, where order size and fill probability are
+        independent).
+
+        ----------------------------------------------------------------
+        Returns
+        ----------------------------------------------------------------
+        (filled: bool, fill_size: float)
+            (False, 0.0) if not strictly inside BBO, if `best_price` /
+            `mid` are NaN, or if the Poisson draw is zero.
+            (True, our_size) on a fill.
+        """
+        if (best_price is None or mid is None
+                or not np.isfinite(best_price) or not np.isfinite(mid)
+                or best_price <= 0 or mid <= 0):
+            return False, 0.0
+
+        # Inside-BBO predicate (same direction as `_initial_queue_ahead`)
+        if side == 'bid':
+            inside = our_price > best_price
+        else:  # 'ask'
+            inside = our_price < best_price
+        if not inside:
+            return False, 0.0
+
+        # Depths from mid.  Using |·| keeps the formula symmetric across
+        # bids/asks and tolerates the rare locked/crossed-book seconds.
+        xi_our  = abs(our_price - mid)
+        xi_best = abs(best_price - mid)
+        if xi_our >= xi_best:
+            # Geometrically not tighter (e.g. our improved bid happens to
+            # sit further from mid because mid is on the wrong side).
+            return False, 0.0
+
+        # Δλ — the uplift only.  Always non-negative once we passed the
+        # xi_our < xi_best gate above, but clamp defensively.
+        delta_lambda = a_intensity * (math.exp(-xi_our / b_scale)
+                                      - math.exp(-xi_best / b_scale))
+        if delta_lambda <= 0:
+            return False, 0.0
+
+        # Bernoulli equivalent: P(≥1) under Poisson(Δλ·dt) is
+        # 1 − exp(−Δλ·dt); we draw the count and check ≥ 1 to keep the
+        # door open to per-bin partial-fill modelling later.
+        n = int(rng.poisson(delta_lambda * dt))
+        if n >= 1:
+            return True, float(our_size)
+        return False, 0.0
 
     def _build_trade_index(self, market_trades: pd.DataFrame) -> Dict[int, pd.DataFrame]:
         """
@@ -186,7 +301,9 @@ class ReplaySimulator:
             day_data: dict,
             inventory_model,
             strategy_type: str = 'optimal',
-            queue_model: str = 'front') -> SimulationResult:
+            queue_model: str = 'front',
+            a_intensity: Optional[float] = None,
+            b_scale: Optional[float] = None) -> SimulationResult:
         """
         Run one trading day using real TAQ data.
 
@@ -200,6 +317,10 @@ class ReplaySimulator:
         strategy_type  : 'optimal' (uses quotes_calibrated) or 'baseline'
         queue_model    : 'front' (best-case, current default) or 'back'
                          (last-in-line at NBBO size)
+        a_intensity    : Override the per-instance Poisson-uplift intensity
+                         at the mid (fills/sec).  None → use self.a_intensity.
+        b_scale        : Override the per-instance Laplace scale.
+                         None → use self.b_scale.
 
         Returns
         -------
@@ -207,6 +328,18 @@ class ReplaySimulator:
         """
         if queue_model not in ('front', 'back'):
             raise ValueError(f"queue_model must be 'front' or 'back', got {queue_model!r}")
+
+        # Per-call overrides for the intra-spread Poisson model.  Falling
+        # back to the instance defaults means a sim built without these
+        # kwargs still works.
+        a_int = self.a_intensity if a_intensity is None else a_intensity
+        b_scl = self.b_scale     if b_scale     is None else b_scale
+
+        # Re-seed the RNG at the start of every run so that repeated calls
+        # against the same day with different (strategy_type, queue_model)
+        # see the same Poisson-event sequence — common random numbers,
+        # which sharpens strategy comparisons.
+        rng = np.random.default_rng(self.rng_seed)
 
         mid_prices = day_data['mid']
         best_bids  = day_data['best_bid']
@@ -272,6 +405,10 @@ class ReplaySimulator:
                 else:
                     bid_q, ask_q = strategy.quotes(best_bid, best_ask)
 
+                # Snap to penny grid (Reg NMS 612, see TICK constant above)
+                bid_q = math.floor(bid_q / TICK) * TICK
+                ask_q = math.ceil(ask_q / TICK) * TICK
+
                 # Sanity check: don't post crossed quotes
                 if bid_q < ask_q:
                     qa_bid = self._initial_queue_ahead(
@@ -304,6 +441,10 @@ class ReplaySimulator:
                     else:
                         bid_q, ask_q = strategy.quotes(best_bid, best_ask)
 
+                    # Snap to penny grid (Reg NMS 612, see TICK constant above)
+                    bid_q = math.floor(bid_q / TICK) * TICK
+                    ask_q = math.ceil(ask_q / TICK) * TICK
+
                     if bid_q < ask_q:
                         qa_bid = self._initial_queue_ahead(
                             bid_q, best_bid, best_bid_sizes[step], 'bid')
@@ -317,15 +458,43 @@ class ReplaySimulator:
                         n_quotes += 1
 
             # ----------------------------------------------------------------
-            # Check fills against real market trades
+            # Check fills.
+            #
+            # Two independent fill mechanisms run side-by-side, then their
+            # results are combined:
+            #
+            #   (1) Observed: historical-print matching against this second's
+            #       trades (`_check_*_fill`) — captures flow that printed on
+            #       the lit tape at or beyond our quote.
+            #
+            #   (2) Theoretical: an Avellaneda-Stoikov-style Poisson uplift
+            #       (`_poisson_uplift_fill`) for orders strictly INSIDE the
+            #       BBO — captures intra-spread flow (midpoint matches,
+            #       hidden orders, price-improvement) that is invisible in
+            #       TAQ.  Returns 0 uplift unless our quote is tighter than
+            #       the touch.
+            #
+            # Combination rule: if either mechanism fires, the order fills
+            # once at OUR quoted price, sized to max(fill_size_obs,
+            # fill_size_poisson).  This avoids double-counting historical
+            # prints that the existing matcher already credits us with,
+            # while still letting Poisson upgrade a partial historical
+            # fill to a full size when an incremental aggressor arrives.
             # ----------------------------------------------------------------
             if active_bid is not None:
-                filled, fill_size, qa_new = self._check_bid_fill(
+                filled_obs, fill_size_obs, qa_new = self._check_bid_fill(
                     active_bid['price'], active_bid['size'], trades_now,
                     active_bid['queue_ahead'], queue_model
                 )
                 active_bid['queue_ahead'] = qa_new
-                if filled and fill_size > 0:
+
+                filled_pois, fill_size_pois = self._poisson_uplift_fill(
+                    active_bid['price'], active_bid['size'],
+                    s, best_bid, 'bid', a_int, b_scl, self.dt, rng,
+                )
+
+                if filled_obs or filled_pois:
+                    fill_size = max(fill_size_obs, fill_size_pois)
                     cash      -= active_bid['price'] * fill_size
                     inventory += fill_size
                     shares_bought += fill_size
@@ -336,12 +505,19 @@ class ReplaySimulator:
                     one_side_filled = True
 
             if active_ask is not None:
-                filled, fill_size, qa_new = self._check_ask_fill(
+                filled_obs, fill_size_obs, qa_new = self._check_ask_fill(
                     active_ask['price'], active_ask['size'], trades_now,
                     active_ask['queue_ahead'], queue_model
                 )
                 active_ask['queue_ahead'] = qa_new
-                if filled and fill_size > 0:
+
+                filled_pois, fill_size_pois = self._poisson_uplift_fill(
+                    active_ask['price'], active_ask['size'],
+                    s, best_ask, 'ask', a_int, b_scl, self.dt, rng,
+                )
+
+                if filled_obs or filled_pois:
+                    fill_size = max(fill_size_obs, fill_size_pois)
                     cash      += active_ask['price'] * fill_size
                     inventory -= fill_size
                     shares_sold   += fill_size

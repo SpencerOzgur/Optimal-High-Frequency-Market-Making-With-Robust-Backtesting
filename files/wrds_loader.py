@@ -40,6 +40,21 @@ T_SECONDS    = 23400.0
 
 BAD_QUOTE_CONDITIONS = {"C", "U", "D", "B", "W", "X", "Y"}
 
+# Per-ticker single-venue restriction (largest-volume venue from
+# exchange_diagnostics output). When a ticker appears here both quote and
+# trade SQL queries are filtered to ex = TICKER_VENUE[ticker]:
+#   - the trade fill universe is restricted to prints reported by that venue
+#   - the "BBO" the simulator sees is that venue's BBO (NOT the consolidated
+#     NBBO), since natbbo_ind is dropped from the quote filter when a venue
+#     is pinned. A ticker without an entry falls back to NBBO across all venues.
+TICKER_VENUE = {
+    'AAPL': 'Q',   # NASDAQ
+    'AMZN': 'Q',   # NASDAQ
+    'GE':   'Y',   # Cboe BYX
+    'IVV':  'P',   # NYSE Arca
+    'M':    'T',   # NASDAQ (trading NYSE-listed)
+}
+
 
 class WRDSLoader:
     """
@@ -147,6 +162,12 @@ class WRDSLoader:
         ask_col, asksiz_col = self._get_quote_schema(table)
         asksiz_expr = f"{asksiz_col} AS asksiz" if asksiz_col else "NULL AS asksiz"
 
+        # If the ticker is pinned to a single venue, restrict the quote stream
+        # to that venue's BBO updates. Otherwise fall back to NBBO-eligible
+        # rows from all venues (the historical behaviour).
+        venue = TICKER_VENUE.get(ticker)
+        venue_clause = f"AND ex = '{venue}'" if venue else ""
+
         query = f"""
             SELECT
                 time_m,
@@ -163,6 +184,7 @@ class WRDSLoader:
               AND bid > 0
               AND {ask_col} > 0
               AND bid < {ask_col}
+              {venue_clause}
         """
 
         df = self.db.raw_sql(query)
@@ -173,7 +195,10 @@ class WRDSLoader:
         if "qu_cond" in df.columns:
             df = df[~df["qu_cond"].isin(BAD_QUOTE_CONDITIONS)]
 
-        if "natbbo_ind" in df.columns:
+        # Only apply the NBBO-eligibility filter when no venue is pinned.
+        # When a venue IS pinned, every kept row IS that venue's BBO update —
+        # filtering to natbbo_ind would silently drop valid venue-BBO ticks.
+        if venue is None and "natbbo_ind" in df.columns:
             df = df[df["natbbo_ind"].isin(["1", "4", 1, 4])]
 
         df = df.sort_values("time_m").reset_index(drop=True)
@@ -185,12 +210,18 @@ class WRDSLoader:
 
         SQL filter:
           - tr_corr = '00'                   (uncorrected)
-          - ex     <> 'D'                    (drop FINRA TRF / off-exchange)
+          - ex constraint:
+              * ticker pinned in TICKER_VENUE  -> ex = TICKER_VENUE[ticker]
+                (subsumes the "drop FINRA TRF" rule, since D is excluded).
+              * otherwise                       -> ex <> 'D'
           - 09:30 <= time_m < 16:00          (regular hours)
           - tr_scond chars all in {' ','@','F','E'}  (regular / ISO / auto-ex only)
             NULL tr_scond is treated as regular and passes.
         """
         table = f"taqmsec.ctm_{date.replace('-', '')}"
+
+        venue = TICKER_VENUE.get(ticker)
+        ex_clause = f"ex = '{venue}'" if venue else "ex <> 'D'"
 
         query = f"""
             SELECT
@@ -208,7 +239,7 @@ class WRDSLoader:
               AND price > 0
               AND size  > 0
               AND tr_corr = '00'
-              AND ex     <> 'D'
+              AND {ex_clause}
               AND (tr_scond IS NULL OR tr_scond ~ '^[ @FE]{{0,4}}$')
         """
 
@@ -417,6 +448,137 @@ def calibrate_kappa(
         return 2.0 / median_depth if median_depth > 0 else 200.0
 
     return kappa
+
+
+def calibrate_poisson_uplift(
+    market_data: dict,
+    n_bins: int = 20,
+) -> Tuple[float, float]:
+    """
+    Calibrate (A, b) for the intra-spread Poisson-uplift fill model used
+    by replay_simulator._poisson_uplift_fill.
+
+    ----------------------------------------------------------------
+    Model
+    ----------------------------------------------------------------
+    Marketable-order arrival intensity at depth ξ from the mid:
+
+        λ(ξ) = A * exp(-ξ / b)
+
+    log λ is linear in ξ with slope (-1/b) and intercept log(A).
+
+    ----------------------------------------------------------------
+    Why intra-spread prints?
+    ----------------------------------------------------------------
+    The replay simulator already credits the strategy with all observed
+    historical prints at-or-beyond its quote price.  The Poisson uplift
+    is meant to capture the *additional* flow that would attract an
+    improved (inside-the-BBO) quote — the kind that doesn't normally
+    print on the lit touch.  The cleanest historical proxy for that
+    flow is precisely the set of trades that printed STRICTLY between
+    best_bid and best_ask: midpoint matches, hidden-order fills,
+    sub-penny price-improvement, dark-pool prints reported by the
+    venue, etc.  We fit (A, b) on those.
+
+    The same TICKER_VENUE filter that the simulator runs against
+    applies upstream when these market_trades were loaded, so the
+    calibration sees the same trade universe the simulator matches
+    against — not a contaminated cross-venue mix.
+
+    ----------------------------------------------------------------
+    Procedure
+    ----------------------------------------------------------------
+      1. For each trade, look up the prevailing 1-second mid and BBO
+         from the day arrays via t_sec.
+      2. Keep ONLY strictly intra-spread prints (best_bid < price <
+         best_ask).
+      3. ξ = |price - mid|.  Bin by ξ over [0, 95th percentile].
+      4. Per-bin arrival rate = count / (n_valid_days * T_SECONDS).
+      5. OLS log(rate) = log(A) - (1/b) * ξ.
+            slope     = -1/b   ⇒   b = -1/slope
+            intercept =  log(A) ⇒   A = exp(intercept)
+
+    Returns (A, b).  Falls back to a conservative (0.01, 0.005) if the
+    fit degenerates (no intra-spread prints, slope non-negative, etc.).
+
+    NOTE on units: A is the per-second arrival rate INTO A SINGLE BIN at
+    ξ=0 (n_bins=20 across [0, 95th-pctile depth]).  Because bin width
+    enters multiplicatively, the absolute magnitude of A is bin-resolution
+    sensitive — but the SHAPE (and therefore how aggressively quotes
+    deeper than the touch lose fills) is set by `b`, which is invariant.
+    The simulator uses (A, b) jointly so they're internally consistent
+    with the same bin choice; if you re-fit with a very different
+    n_bins, expect A to scale roughly by Δξ_old / Δξ_new.
+    """
+    fallback = (0.01, 0.005)
+
+    all_depths: List[np.ndarray] = []
+    n_valid_days = 0
+
+    for day in market_data.values():
+        if day is None:
+            continue
+        trades = day["market_trades"]
+        if trades.empty:
+            continue
+        n_valid_days += 1
+
+        mid = day["mid"]
+        bb  = day["best_bid"]
+        ba  = day["best_ask"]
+
+        sec_idx = trades["t_sec"].to_numpy().astype(int)
+        sec_idx = np.clip(sec_idx, 0, len(mid) - 1)
+        mid_at = mid[sec_idx]
+        bb_at  = bb[sec_idx]
+        ba_at  = ba[sec_idx]
+
+        prices = trades["price"].to_numpy(dtype=float)
+
+        # Strictly intra-spread (excludes prints that hit the touch on
+        # either side — those are the OBSERVED flow the simulator already
+        # matches against and would be double-counted if included here).
+        intra = (prices > bb_at) & (prices < ba_at)
+        if not intra.any():
+            continue
+
+        all_depths.append(np.abs(prices[intra] - mid_at[intra]))
+
+    if not all_depths or n_valid_days == 0:
+        return fallback
+
+    depths = np.concatenate(all_depths)
+    if len(depths) < 2:
+        return fallback
+
+    max_depth = float(np.percentile(depths, 95))
+    if max_depth <= 0:
+        return fallback
+
+    bin_edges = np.linspace(0.0, max_depth, n_bins + 1)
+    counts, _ = np.histogram(depths, bins=bin_edges)
+    centres   = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+
+    total_seconds = n_valid_days * T_SECONDS
+    rates = counts / total_seconds
+
+    keep = rates > 0
+    if int(keep.sum()) < 2:
+        return fallback
+
+    log_rates = np.log(rates[keep])
+    slope, intercept = np.polyfit(centres[keep], log_rates, 1)
+
+    if not np.isfinite(slope) or slope >= 0:
+        return fallback
+
+    b = -1.0 / float(slope)
+    A = float(np.exp(intercept))
+
+    if not np.isfinite(b) or b <= 0 or not np.isfinite(A) or A <= 0:
+        return fallback
+
+    return A, b
 
 
 def estimate_bathtub_profile(
