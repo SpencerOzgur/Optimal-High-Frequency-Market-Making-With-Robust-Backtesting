@@ -283,6 +283,126 @@ def plot_pnl_and_inventory(ticker: str,
 # Convenience: plot everything for all stocks
 # ---------------------------------------------------------------------------
 
+def plot_quote_dynamics(ticker: str,
+                         as_model,
+                         optimal_results: list,
+                         day_idx: int = 0,
+                         save: bool = True,
+                         subfolder: str = 'wrds'):
+    """
+    Replicate Stanford paper Figure 3: mid-price, indifference price,
+    bid quotes and ask quotes over the trading day.
+
+    Main panel: full day with all four series
+    Inset panel: zoomed first 30 minutes to show bid/ask spread separation
+
+    Mid-price    — black line
+    Indifference — green line
+    Ask quotes   — red filled dots
+    Bid quotes   — red open circles
+    """
+    results_dir = _get_results_dir(subfolder)
+    res         = optimal_results[day_idx]
+
+    T_SECONDS = 23400.0
+    n         = len(res.times)
+    t_norm    = res.times / T_SECONDS
+
+    mid = res.mid_prices
+
+    # Compute indifference price at each second
+    r = np.array([
+        as_model.indifference_price(mid[i], res.inventory[i], t_norm[i])
+        for i in range(n)
+    ])
+
+    # Per-side active masks
+    bid_active = ~np.isnan(res.bid_prices)
+    ask_active = ~np.isnan(res.ask_prices)
+
+    # Downsample for main panel — plot every 10th point to reduce density
+    # while preserving the visual shape of the price path
+    step       = 10
+    t_ds       = t_norm[::step]
+    mid_ds     = mid[::step]
+    r_ds       = r[::step]
+
+    fig, ax = plt.subplots(figsize=(13, 6))
+
+    # --- Main panel ---
+
+    # Mid-price — black line
+    ax.plot(t_ds, mid_ds, color='black', lw=1.0,
+            label='Mid-market price', zorder=4)
+
+    # Indifference price — green line
+    ax.plot(t_ds, r_ds, color='green', lw=1.0,
+            label='Indifference Price', zorder=3, alpha=0.85)
+
+    # Ask quotes — red filled dots (subsample for visibility)
+    ask_idx = np.where(ask_active)[0][::5]
+    ax.scatter(t_norm[ask_idx], res.ask_prices[ask_idx],
+               color='red', s=6, marker='o',
+               label='Price asked', zorder=2, alpha=0.5)
+
+    # Bid quotes — red open circles (subsample for visibility)
+    bid_idx = np.where(bid_active)[0][::5]
+    ax.scatter(t_norm[bid_idx], res.bid_prices[bid_idx],
+               color='red', s=6, marker='o',
+               facecolors='none', edgecolors='red', linewidths=0.6,
+               label='Price bid', zorder=2, alpha=0.5)
+
+    ax.set_xlabel('Time', fontsize=11)
+    ax.set_ylabel('Stock Price', fontsize=11)
+    ax.set_title(f'{ticker}: Mid-price, Indifference Price and Quotes',
+                 fontsize=12)
+    ax.set_xlim(0, 1)
+    ax.legend(fontsize=9, loc='upper right')
+
+    # --- Inset: zoom first 30 minutes ---
+    # Shows bid/ask spread separation and indifference price deviation
+    zoom_end   = int(0.077 * n)   # first 30 min = 1800s / 23400s ≈ 0.077
+    ax_inset   = fig.add_axes([0.13, 0.54, 0.22, 0.32])
+
+    ax_inset.plot(t_norm[:zoom_end], mid[:zoom_end],
+                  color='black', lw=1.0)
+    ax_inset.plot(t_norm[:zoom_end], r[:zoom_end],
+                  color='green', lw=1.0, alpha=0.85)
+
+    ask_zoom = ask_active[:zoom_end]
+    bid_zoom = bid_active[:zoom_end]
+
+    ax_inset.scatter(t_norm[:zoom_end][ask_zoom],
+                     res.ask_prices[:zoom_end][ask_zoom],
+                     color='red', s=8, marker='o', alpha=0.7)
+    ax_inset.scatter(t_norm[:zoom_end][bid_zoom],
+                     res.bid_prices[:zoom_end][bid_zoom],
+                     color='red', s=8, marker='o',
+                     facecolors='none', edgecolors='red',
+                     linewidths=0.7, alpha=0.7)
+
+    ax_inset.set_title('Open (9:30–10:00)', fontsize=7)
+    ax_inset.tick_params(labelsize=6)
+    ax_inset.set_xlim(0, t_norm[zoom_end])
+
+    # Draw rectangle on main panel showing inset region
+    from matplotlib.patches import Rectangle
+    y_min = min(np.nanmin(res.bid_prices[:zoom_end]),
+                mid[:zoom_end].min()) - 0.05
+    y_max = max(np.nanmax(res.ask_prices[:zoom_end]),
+                mid[:zoom_end].max()) + 0.05
+    rect = Rectangle((0, y_min), t_norm[zoom_end], y_max - y_min,
+                      linewidth=0.8, edgecolor='gray',
+                      facecolor='lightyellow', alpha=0.3, zorder=0)
+    ax.add_patch(rect)
+
+    plt.tight_layout()
+    if save:
+        path = os.path.join(results_dir, f'fig_quote_dynamics_{ticker}.png')
+        plt.savefig(path, dpi=150, bbox_inches='tight')
+        print(f"Saved: {path}")
+    plt.close()
+
 def plot_all(all_results: dict, save=True, subfolder='synthetic'):
     """
     Generate all figures for all stocks. When the results dict contains
@@ -308,7 +428,8 @@ def plot_all(all_results: dict, save=True, subfolder='synthetic'):
     ]
 
     for opt_key, base_key, folder in variants:
-        if not all(opt_key in res and base_key in res for res in all_results.values()):
+        if not all(opt_key in res and base_key in res
+                   for res in all_results.values()):
             continue
         print(f"\nSaving plots to: plots/{folder}/")
         for ticker, res in all_results.items():
@@ -319,6 +440,9 @@ def plot_all(all_results: dict, save=True, subfolder='synthetic'):
             plot_pnl_and_inventory(ticker,
                                     res[opt_key], res[base_key],
                                     save=save, subfolder=folder)
+            plot_quote_dynamics(ticker, res['as_model'],
+                                res[opt_key],
+                                save=save, subfolder=folder)
 
 
 if __name__ == '__main__':
