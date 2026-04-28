@@ -17,7 +17,7 @@ import pickle
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from wrds_loader import WRDSLoader, estimate_sigma, calibrate_kappa
+from wrds_loader import WRDSLoader, estimate_sigma, TICKER_VENUE
 from market_maker import AvellanedaStoikov, InventoryModel, BaselineStrategy
 from replay_simulator import ReplaySimulator
 from helpers import summarise_results, summarise_order_stats, print_fill_analysis, export_quote_position_xlsx, export_fill_stats_xlsx
@@ -44,16 +44,53 @@ GAMMA_PARAMS = {
     'M':    0.1,
 }
 
+# Per-ticker kappa fit by `python3 files/calibrate_params.py` on the prior
+# week (2017-06-05..2017-06-09). Re-run that script and paste the new
+# values below if you change tickers, dates, or the venue map.
+
 KAPPA_PARAMS = {
-    'AAPL': 100,
-    'AMZN': 5,
-    'GE':   40,
-    'IVV':  40,
-    'M':    80,
+    'AAPL': 81.81,
+    'AMZN': 7.57,
+    'GE':   292.55,
+    'IVV':  200,
+    'M':    111.899,
 }
 
-#For calibration purposes
-#KAPPA_PARAMS: dict = {} 
+# ---------------------------------------------------------------------------
+# Intra-spread Poisson-uplift fill model (per ticker).
+# ---------------------------------------------------------------------------
+# When the optimal strategy posts INSIDE the BBO, we can't observe the extra
+# aggressors that would have come at our improved price (midpoint matches,
+# hidden orders, price-improvement flow). The replay simulator augments the
+# historical-trade fill check with a Poisson process whose rate decays
+# exponentially with depth from mid:
+#
+#     λ(ξ) = A * exp(-ξ / b),       Δλ = λ(ξ_our) - λ(ξ_best)
+#
+# A is fills/sec at the mid; b is the Laplace scale (decay width) in dollars.
+#
+# Values below were fit by `python3 files/calibrate_params.py`, which runs
+# the textbook AS exponential fit on STRICTLY intra-spread prints from the
+# week PRIOR to the evaluation window (2017-06-05..2017-06-09), using the
+# same TICKER_VENUE / addressable-flow filters the simulator matches
+# against. Re-run that script and paste the new table below if you change
+# tickers, dates, or the venue map.
+# ---------------------------------------------------------------------------
+A_PARAMS = {
+    'AAPL': 0.23980,
+    'AMZN': 0.02740,
+    'GE':   0.00822,
+    'IVV':  0.00215,
+    'M':    0.07232,
+}
+
+B_PARAMS = {
+    'AAPL': 0.00381,
+    'AMZN': 0.12252,
+    'GE':   0.00383,
+    'IVV':  0.00506,
+    'M':    0.00227,
+}
 
 PHI_MAX = 100.0
 ETA     = 0.005
@@ -115,14 +152,10 @@ def run_wrds_experiment(tickers=TICKERS, dates=DATES):
 
         median_spread = float(np.nanmedian(np.concatenate(all_spreads)))
 
-        # Textbook A-S kappa: fit lambda(delta) = A * exp(-kappa * delta) from
-        # the per-ticker market trades pooled across days. See
-        # wrds_loader.calibrate_kappa for the math and aggressor-side rule.
-        ticker_days = {d: raw_data[ticker][d]
-                       for d in dates if raw_data[ticker][d] is not None}
-        #KAPPA_PARAMS[ticker] = calibrate_kappa(ticker_days)
-
-        print(f"  {ticker}: empirical open_spread={open_spread:.4f} "
+        # Per-ticker kappa is loaded from KAPPA_PARAMS above (calibrated
+        # offline by files/calibrate_params.py on the prior week).
+        venue_label = TICKER_VENUE.get(ticker, "NBBO")
+        print(f"  {ticker} [{venue_label}]: empirical open_spread={open_spread:.4f} "
               f"close_spread={close_spread:.4f} "
               f"median_spread={median_spread:.4f} kappa={KAPPA_PARAMS[ticker]:.2f}")
 
@@ -157,14 +190,25 @@ def run_wrds_experiment(tickers=TICKERS, dates=DATES):
 
             print(f"    {ticker} {date}...", end=" ", flush=True)
 
+            # Per-ticker A/b for the intra-spread Poisson uplift (see
+            # A_PARAMS/B_PARAMS module-level docstring). Same values flow
+            # into every (strategy, queue_model) combination so common
+            # random numbers across runs are honoured.
+            a_t = A_PARAMS[ticker]
+            b_t = B_PARAMS[ticker]
+
             res_opt_front  = sim.run(as_model, day, inv_model,
-                                     strategy_type='optimal',  queue_model='front')
+                                     strategy_type='optimal',  queue_model='front',
+                                     a_intensity=a_t, b_scale=b_t)
             res_opt_back   = sim.run(as_model, day, inv_model,
-                                     strategy_type='optimal',  queue_model='back')
+                                     strategy_type='optimal',  queue_model='back',
+                                     a_intensity=a_t, b_scale=b_t)
             res_base_front = sim.run(baseline, day, inv_model,
-                                     strategy_type='baseline', queue_model='front')
+                                     strategy_type='baseline', queue_model='front',
+                                     a_intensity=a_t, b_scale=b_t)
             res_base_back  = sim.run(baseline, day, inv_model,
-                                     strategy_type='baseline', queue_model='back')
+                                     strategy_type='baseline', queue_model='back',
+                                     a_intensity=a_t, b_scale=b_t)
 
             optimal_front_results.append(res_opt_front)
             optimal_back_results.append(res_opt_back)
