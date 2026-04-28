@@ -13,6 +13,7 @@ Credentials are saved to ~/.pgpass so you won't be prompted again.
 import numpy as np
 import pandas as pd
 import sys, os
+import pickle
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -57,6 +58,8 @@ KAPPA_PARAMS = {
 PHI_MAX = 100.0
 ETA     = 0.005
 
+CACHE_PATH = 'sheets/raw_data.pkl'
+
 
 # ---------------------------------------------------------------------------
 # Main
@@ -67,9 +70,18 @@ def run_wrds_experiment(tickers=TICKERS, dates=DATES):
     print("=" * 60)
     print("  Step 1: Loading TAQ data from WRDS")
     print("=" * 60)
-    loader = WRDSLoader()
-    raw_data = loader.load_week(tickers=tickers, dates=dates)
-    loader.close()
+    try:
+        with open(CACHE_PATH, 'rb') as f:
+            raw_data = pickle.load(f)
+        print("Loaded raw_data from cache.")
+    except FileNotFoundError:
+        loader = WRDSLoader()
+        raw_data = loader.load_week(tickers=tickers, dates=dates)
+        loader.close()
+        os.makedirs('sheets', exist_ok=True)
+        with open(CACHE_PATH, 'wb') as f:
+            pickle.dump(raw_data, f)
+        print("Fetched from WRDS and cached.")
     print()
 
     # 2. Build strategies and run simulation for each ticker
