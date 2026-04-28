@@ -132,7 +132,7 @@ class RealizedVolSimulator(ReplaySimulator):
 
 def compute_realized_vol2(trades: pd.DataFrame,
                            sigma_fallback: float,
-                           window: int = 1800,
+                           window: int = 600,
                            price: float = 1.0) -> np.ndarray:
     """
     Compute rolling realized dollar variance from TAQ trade prices.
