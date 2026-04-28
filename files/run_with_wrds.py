@@ -96,6 +96,7 @@ PHI_MAX = 100.0
 ETA     = 0.005
 
 CACHE_PATH = 'sheets/raw_data.pkl'
+CACHE_PATH_RESULTS = 'sheets/results.pkl'
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +262,15 @@ def run_wrds_experiment(tickers=TICKERS, dates=DATES):
 
 
 if __name__ == '__main__':
-    results, best_bid_dict, best_ask_dict = run_wrds_experiment()
+    rerun = True
+    if rerun:
+        results, best_bid_dict, best_ask_dict = run_wrds_experiment()
+        with open(CACHE_PATH_RESULTS, 'wb') as f:
+            pickle.dump((results, best_bid_dict, best_ask_dict), f)
+            print('cached.')
+    else:
+        with open(CACHE_PATH_RESULTS, 'rb') as f:
+            results, best_bid_dict, best_ask_dict = pickle.load(f)
 
     # Optionally generate plots
     try:

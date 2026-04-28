@@ -345,9 +345,10 @@ class WRDSLoader:
 # Calibration helpers
 # ---------------------------------------------------------------------------
 
+# returns a daily sigma value
 def estimate_sigma(market_data: dict) -> float:
     sigmas = [day["sigma"] for day in market_data.values() if day is not None]
-    return float(np.mean(sigmas)) if sigmas else 0.0
+    return float(np.mean(sigmas))*(23400**0.5) if sigmas else 0.0
 
 
 def calibrate_kappa(
