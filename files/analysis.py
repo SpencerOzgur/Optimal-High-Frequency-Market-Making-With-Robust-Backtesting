@@ -23,6 +23,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import os
+import pandas as pd
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -403,6 +404,95 @@ def plot_quote_dynamics(ticker: str,
         print(f"Saved: {path}")
     plt.close()
 
+def plot_quoted_vs_actual_spread(ticker: str,
+                                  optimal_results: list,
+                                  baseline_results: list,
+                                  day_idx: int = 0,
+                                  save: bool = True,
+                                  subfolder: str = 'wrds'):
+    """
+    Plot quoted spread (our bid/ask) vs actual market spread (NBBO)
+    over the trading day for both optimal and baseline strategies.
+
+    Shows:
+    - Market spread (NBBO best_ask - best_bid) — blue
+    - Optimal quoted spread — red
+    - Baseline quoted spread — green dashed
+    """
+    results_dir = _get_results_dir(subfolder)
+    res_opt     = optimal_results[day_idx]
+    res_base    = baseline_results[day_idx]
+
+    T_SECONDS = 23400.0
+    t_hours   = res_opt.times / 3600 + 9.5
+
+    # Quoted spreads — our bid/ask
+    opt_spread  = res_opt.ask_prices  - res_opt.bid_prices
+    base_spread = res_base.ask_prices - res_base.bid_prices
+
+    # Market spread — from baseline quotes which track NBBO exactly
+    # Baseline always quotes at best_bid/best_ask so its spread = market spread
+    market_spread = base_spread.copy()
+
+    fig, axes = plt.subplots(2, 1, figsize=(12, 8),
+                              sharex=True, gridspec_kw={'hspace': 0.35})
+
+    # --- Top panel: raw spreads ---
+    ax = axes[0]
+
+    ax.plot(t_hours, market_spread,  color='steelblue', lw=0.6,
+            alpha=0.7, label='Market spread (NBBO)')
+    ax.plot(t_hours, opt_spread,     color='red',       lw=0.8,
+            alpha=0.8, label='Optimal quoted spread')
+    ax.plot(t_hours, base_spread,    color='green',     lw=0.6,
+            alpha=0.6, linestyle='--', label='Baseline quoted spread')
+
+    ax.set_ylabel('Spread ($)', fontsize=10)
+    ax.set_title(f'{ticker}: Quoted vs Market Spread', fontsize=11)
+    ax.legend(fontsize=8)
+    ax.set_xlim(9.5, 16.0)
+    _apply_time_axis(ax, sparse=False, rotation=30)
+
+    # Add horizontal line at close_spread (B = minimum spread)
+    if hasattr(optimal_results[day_idx], 'as_model'):
+        pass  # as_model not in SimulationResult — skip
+
+    # --- Bottom panel: difference (quoted - market) ---
+    ax2    = axes[1]
+    diff   = opt_spread - market_spread
+
+    # Smooth with rolling mean for readability
+    diff_series = pd.Series(diff).rolling(300, min_periods=1).mean()
+
+    ax2.plot(t_hours, diff_series, color='purple', lw=1.0,
+             label='Optimal spread - Market spread (300s rolling avg)')
+    ax2.axhline(0, color='black', lw=0.6, linestyle=':')
+
+    # Shade regions where optimal is wider vs tighter than market
+    ax2.fill_between(t_hours, diff_series, 0,
+                     where=diff_series > 0,
+                     color='red', alpha=0.15,
+                     label='Optimal wider than market')
+    ax2.fill_between(t_hours, diff_series, 0,
+                     where=diff_series < 0,
+                     color='green', alpha=0.15,
+                     label='Optimal tighter than market')
+
+    ax2.set_ylabel('Spread difference ($)', fontsize=10)
+    ax2.set_title('Optimal spread minus market spread (rolling 5-min avg)',
+                  fontsize=10)
+    ax2.legend(fontsize=8)
+    ax2.set_xlim(9.5, 16.0)
+    _apply_time_axis(ax2, sparse=False, rotation=30)
+
+    plt.tight_layout()
+    if save:
+        path = os.path.join(results_dir,
+                            f'fig_spread_comparison_{ticker}.png')
+        plt.savefig(path, dpi=150, bbox_inches='tight')
+        print(f"Saved: {path}")
+    plt.close()
+
 def plot_all(all_results: dict, save=True, subfolder='synthetic'):
     """
     Generate all figures for all stocks. When the results dict contains
@@ -443,7 +533,9 @@ def plot_all(all_results: dict, save=True, subfolder='synthetic'):
             plot_quote_dynamics(ticker, res['as_model'],
                                 res[opt_key],
                                 save=save, subfolder=folder)
-
+            plot_quoted_vs_actual_spread(ticker,
+                                         res[opt_key], res[base_key],
+                                         save=save, subfolder=folder)
 
 if __name__ == '__main__':
     plot_order_size_function(subfolder='synthetic')
