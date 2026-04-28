@@ -45,7 +45,7 @@ class AvellanedaStoikov:
     def optimal_spread(self, t: float) -> float:
         gs2 = getattr(self, 'gamma_sigma2', self.gamma * self.sigma ** 2)
         time_component = gs2 * (self.T - t)
-        closing_spread = np.log(1 + self.gamma / self.kappa)
+        closing_spread = (2.0 / self.gamma) * np.log(1 + self.gamma / self.kappa)
         return time_component + closing_spread
 
     def quotes(self, s: float, q: float, t: float):
@@ -91,9 +91,9 @@ class AvellanedaStoikov:
 
         # Back out kappa from B = ln(1 + gamma/kappa)
         # => gamma/kappa = exp(B) - 1  => kappa = gamma / (exp(B) - 1)
-        exp_B = np.exp(B)
-        if exp_B > 1:
-            self.kappa = self.gamma / (exp_B - 1)
+        exp_term = np.exp(B * self.gamma / 2.0)
+        if exp_term > 1:
+            self.kappa = self.gamma / (exp_term - 1)
         # else kappa stays as initialised
 
         return self.A, self.B

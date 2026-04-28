@@ -16,7 +16,7 @@ import sys, os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from wrds_loader import WRDSLoader, estimate_sigma
+from wrds_loader import WRDSLoader, estimate_sigma, calibrate_kappa
 from market_maker import AvellanedaStoikov, InventoryModel, BaselineStrategy
 from replay_simulator import ReplaySimulator
 from helpers import summarise_results, summarise_order_stats, print_fill_analysis, export_quote_position_xlsx, export_fill_stats_xlsx
@@ -35,7 +35,6 @@ DATES = [
     '2017-06-16',
 ]
 
-# Keep only gamma since that's a model parameter not a data parameter
 GAMMA_PARAMS = {
     'AAPL': 0.001,
     'AMZN': 0.001,
@@ -43,6 +42,17 @@ GAMMA_PARAMS = {
     'IVV':  0.001,
     'M':    0.001,
 }
+
+KAPPA_PARAMS = {
+    'AAPL': 100,
+    'AMZN': 5,
+    'GE':   40,
+    'IVV':  40,
+    'M':    80,
+}
+
+#For calibration purposes
+#KAPPA_PARAMS: dict = {} 
 
 PHI_MAX = 100.0
 ETA     = 0.005
@@ -79,29 +89,45 @@ def run_wrds_experiment(tickers=TICKERS, dates=DATES):
         # Estimate spreads empirically from actual data
         open_spreads = []
         close_spreads = []
+        all_spreads = []
         for d in dates:
             if raw_data[ticker][d] is not None:
                 spreads = raw_data[ticker][d]['best_ask'] - raw_data[ticker][d]['best_bid']
                 open_spreads.append(float(np.nanmedian(spreads[:1800])))
                 close_spreads.append(float(np.nanmedian(spreads[-1800:])))
+                all_spreads.append(spreads)
 
         open_spread = float(np.mean(open_spreads))
         close_spread = float(np.mean(close_spreads))
 
-        print(f"  {ticker}: empirical open_spread={open_spread:.4f} close_spread={close_spread:.4f}")
+        median_spread = float(np.nanmedian(np.concatenate(all_spreads)))
+
+        # Textbook A-S kappa: fit lambda(delta) = A * exp(-kappa * delta) from
+        # the per-ticker market trades pooled across days. See
+        # wrds_loader.calibrate_kappa for the math and aggressor-side rule.
+        ticker_days = {d: raw_data[ticker][d]
+                       for d in dates if raw_data[ticker][d] is not None}
+        #KAPPA_PARAMS[ticker] = calibrate_kappa(ticker_days)
+
+        print(f"  {ticker}: empirical open_spread={open_spread:.4f} "
+              f"close_spread={close_spread:.4f} "
+              f"median_spread={median_spread:.4f} kappa={KAPPA_PARAMS[ticker]:.2f}")
 
         sigma = estimate_sigma({d: raw_data[ticker][d]
                                 for d in dates if raw_data[ticker][d]})
 
+
+
         as_model = AvellanedaStoikov(
             gamma=GAMMA_PARAMS[ticker],
             sigma=sigma,
-            kappa=2.0,
-            T=1.0
+            kappa=KAPPA_PARAMS[ticker],
+            T=1.0,
         )
-        as_model.calibrate_from_market(open_spread, close_spread)
-        as_model.gamma_sigma2 = as_model.gamma_sigma2 / 23400.0
 
+        #Incorrect calibration logic
+        #as_model.calibrate_from_market(open_spread, close_spread)
+        #as_model.gamma_sigma2 = as_model.gamma_sigma2 / 23400.0
 
         baseline = BaselineStrategy()
 
