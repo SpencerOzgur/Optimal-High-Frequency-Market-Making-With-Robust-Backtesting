@@ -184,10 +184,8 @@ def poisson_fill(alpha_t: float, xi: float,
 # Mid-price path — arithmetic BM (Section 2.1: dSt = sigma * dWt)
 # ---------------------------------------------------------------------------
 
-def generate_mid_price(s0: float, sigma: float, seed: int = None) -> np.ndarray:
+def generate_mid_price(s0: float, sigma: float) -> np.ndarray:
     """Generate one day's mid-price path. Returns array of length n_steps+1."""
-    if seed is not None:
-        np.random.seed(seed)
     n_steps = int(T_SECONDS / DT)
     shocks  = sigma * np.random.randn(n_steps)
     mid     = np.zeros(n_steps + 1)
@@ -377,7 +375,7 @@ class PoissonSimulator:
 # Experiment runner
 # ---------------------------------------------------------------------------
 
-def run_experiment(n_days: int = N_DAYS):
+def run_experiment(n_days: int = N_DAYS, seed: int = 42):
     """
     Run the full experiment matching paper Section 4.
 
@@ -385,7 +383,13 @@ def run_experiment(n_days: int = N_DAYS):
 
     gamma_sigma2 rescaled by T_SECONDS: fixes inventory shading magnitude.
     effective_mu scaled by open_spread: fixes AMZN fill probability.
+
+    A single global seed is set once at the top so the entire run is
+    reproducible end-to-end. RNG state flows continuously across all
+    tickers and days — no per-day reseeding.
     """
+    np.random.seed(seed)
+
     sim       = PoissonSimulator()
     inv_model = InventoryModel(phi_max=PHI_MAX, eta=ETA)
 
@@ -395,6 +399,7 @@ def run_experiment(n_days: int = N_DAYS):
     print("  Poisson Simulator — Stanford A-S paper (Section 3)")
     print(f"  mu={MU}, alpha={ALPHA_GAMMA}, theta={THETA:.4f}")
     print(f"  phi_max={PHI_MAX}, eta={ETA}, delta={DT}s, days={n_days}")
+    print(f"  seed={seed}")
     print("=" * 65)
 
     for ticker, sp in SPREAD_PARAMS.items():
@@ -422,8 +427,8 @@ def run_experiment(n_days: int = N_DAYS):
         print(f"\n  {ticker}: A={as_model.A:.6f} B={as_model.B:.4f} "
               f"gs2={as_model.gamma_sigma2:.8f} "
               f"effective_mu={effective_mu:.2f} "
-              f"spread(0)={as_model.optimal_spread_calibrated(0):.4f} "
-              f"spread(1)={as_model.optimal_spread_calibrated(1):.4f}")
+              f"spread(0)={as_model.A * as_model.T + as_model.B:.4f} "
+              f"spread(1)={as_model.B:.4f}")
 
         baseline = BaselineStrategy()
 
@@ -431,8 +436,9 @@ def run_experiment(n_days: int = N_DAYS):
         baseline_results = []
 
         for day_i in range(n_days):
-            seed = hash(ticker + str(day_i)) % (2**31)
-            mid  = generate_mid_price(sp['s0'], sp['sigma'], seed=seed)
+            # Both strategies share the same mid-price path each day.
+            # The path is drawn from continuous global RNG state — no reseeding.
+            mid = generate_mid_price(sp['s0'], sp['sigma'])
 
             res_opt  = sim.run(as_model, mid,
                                sp['open_spread'], sp['close_spread'],
@@ -500,9 +506,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='A-S Poisson Simulator')
     parser.add_argument('--days', type=int, default=N_DAYS,
                         help='Number of days to simulate (default 5, use 100 for full run)')
+    parser.add_argument('--seed', type=int, default=42,
+                        help='Global random seed (default 42)')
     args = parser.parse_args()
 
-    all_results = run_experiment(n_days=args.days)
+    all_results = run_experiment(n_days=args.days, seed=args.seed)
 
     print("\n--- Quote Distance from NBBO ---")
     dist_df = compute_quote_distance_stats(all_results, SPREAD_PARAMS)

@@ -99,13 +99,13 @@ class AvellanedaStoikov:
 
         return self.A, self.B
 
-    # def optimal_spread_calibrated(self, t: float) -> float:
-    #     """
-    #     Spread using calibrated A and B (call calibrate_from_market first).
-    #     """
-    #     if hasattr(self, 'A'):
-    #         return self.A * (self.T - t) + self.B
-    #     return self.optimal_spread(t)
+    def optimal_spread_calibrated(self, t: float) -> float:
+        """
+        Spread using calibrated A and B (call calibrate_from_market first).
+        """
+        if hasattr(self, 'A'):
+            return self.A * (self.T - t) + self.B
+        return self.optimal_spread(t)
 
     def quotes_calibrated(self, s: float, q: float, t: float):
         """
