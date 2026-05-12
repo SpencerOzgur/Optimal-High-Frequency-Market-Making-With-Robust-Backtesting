@@ -33,6 +33,8 @@ import pandas as pd
 from dataclasses import dataclass
 from typing import List, Optional, Dict
 
+from market_maker import InventoryModel, BASELINE_INVENTORY_MODEL_ENABLED
+
 
 # Reg NMS Rule 612: stocks priced >= $1 must quote on the penny grid.
 TICK = 0.01
@@ -329,6 +331,16 @@ class ReplaySimulator:
         if queue_model not in ('front', 'back'):
             raise ValueError(f"queue_model must be 'front' or 'back', got {queue_model!r}")
 
+        # Per-strategy inventory toggle: baseline gets its own InventoryModel
+        # so INVENTORY_MODEL_ENABLED (optimal) and BASELINE_INVENTORY_MODEL_ENABLED
+        # (baseline) can be flipped independently.
+        if strategy_type == 'baseline':
+            inv = InventoryModel(phi_max=inventory_model.phi_max,
+                                 eta=inventory_model.eta,
+                                 enabled=BASELINE_INVENTORY_MODEL_ENABLED)
+        else:
+            inv = inventory_model
+
         # Per-call overrides for the intra-spread Poisson model.  Falling
         # back to the instance defaults means a sim built without these
         # kwargs still works.
@@ -398,7 +410,7 @@ class ReplaySimulator:
 
             if n_active == 0:
                 # Place new bid and ask
-                phi_bid, phi_ask = inventory_model.order_sizes(inventory)
+                phi_bid, phi_ask = inv.order_sizes(inventory)
 
                 if strategy_type == 'optimal':
                     bid_q, ask_q = strategy.quotes_calibrated(s, inventory, t_norm)
@@ -434,7 +446,7 @@ class ReplaySimulator:
             elif n_active == 2:
                 # Refresh quotes every update_time seconds
                 if t - last_quote_time > self.update_time:
-                    phi_bid, phi_ask = inventory_model.order_sizes(inventory)
+                    phi_bid, phi_ask = inv.order_sizes(inventory)
 
                     if strategy_type == 'optimal':
                         bid_q, ask_q = strategy.quotes_calibrated(s, inventory, t_norm)

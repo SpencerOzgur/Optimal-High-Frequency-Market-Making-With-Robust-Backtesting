@@ -37,12 +37,13 @@ DATES = [
 ]
 
 GAMMA_PARAMS = {
-    'AAPL': 0.1,
-    'AMZN': 0.1,
-    'GE':   0.1,
-    'IVV':  0.1,
-    'M':    0.1,
+    'AAPL': 1e-7,    # plateau, any γ ≤ 1e-6 gives same +$584
+    'AMZN': 1e-7,    # right-pole — only profitable mode for this ticker
+    'GE':   1e-5,    # slight peak at this gs2 ≈ 1.8e-5
+    'IVV':  1e-9,    # plateau at small γ
+    'M':    3e-4, # genuine narrow sweet spot at +$32
 }
+
 
 # Per-ticker kappa fit by `python3 files/calibrate_params.py` on the prior
 # week (2017-06-05..2017-06-09). Re-run that script and paste the new

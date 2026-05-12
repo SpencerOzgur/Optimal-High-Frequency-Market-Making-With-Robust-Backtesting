@@ -85,8 +85,9 @@ def run_debug(ticker: str = 'AAPL', date: str = '2017-06-12'):
     print(f"  Min               : {np.nanmin(mid):.4f}")
     print(f"  Max               : {np.nanmax(mid):.4f}")
     print(f"  Daily range       : {np.nanmax(mid) - np.nanmin(mid):.4f}")
-    print(f"  Sigma (per sec)   : {sigma:.8f}")
-    print(f"  Sigma (annualized): {sigma * np.sqrt(252 * 23400):.4f}")
+    print(f"  Sigma ($/sec)     : {sigma:.8f}")
+    print(f"  Sigma ($/day)     : {sigma * np.sqrt(23400):.4f}")
+    print(f"  Sigma ($, annual) : {sigma * np.sqrt(252 * 23400):.4f}")
 
     subsection("Market spread statistics (best_ask - best_bid)")
     spreads = best_ask - best_bid

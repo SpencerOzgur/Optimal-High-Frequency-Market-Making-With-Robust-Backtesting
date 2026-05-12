@@ -54,7 +54,8 @@ import argparse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from market_maker import AvellanedaStoikov, InventoryModel, BaselineStrategy
+from market_maker import (AvellanedaStoikov, InventoryModel, BaselineStrategy,
+                            BASELINE_INVENTORY_MODEL_ENABLED)
 from helpers import summarise_results, summarise_order_stats, print_fill_analysis, compute_quote_distance_stats
 from replay_simulator import SimulationResult, Fill
 
@@ -243,6 +244,15 @@ class PoissonSimulator:
         n_steps = len(mid) - 1
         T       = self.T_seconds
 
+        # Per-strategy inventory toggle: baseline gets its own InventoryModel
+        # so the optimal/baseline toggles can be flipped independently.
+        if strategy_type == 'baseline':
+            inv = InventoryModel(phi_max=inventory_model.phi_max,
+                                 eta=inventory_model.eta,
+                                 enabled=BASELINE_INVENTORY_MODEL_ENABLED)
+        else:
+            inv = inventory_model
+
         cash      = 0.0
         inventory = 0.0
         pnl_arr   = np.zeros(n_steps + 1)
@@ -278,7 +288,7 @@ class PoissonSimulator:
 
             # --- Algorithm 1 (Section 2.3) ---
             if n_active == 0:
-                phi_bid, phi_ask = inventory_model.order_sizes(inventory)
+                phi_bid, phi_ask = inv.order_sizes(inventory)
 
                 if strategy_type == 'optimal':
                     bid_q, ask_q = strategy.quotes_calibrated(s, inventory, t_norm)
@@ -298,7 +308,7 @@ class PoissonSimulator:
 
             else:  # n_active == 2
                 if t - last_quote_time > self.update_time:
-                    phi_bid, phi_ask = inventory_model.order_sizes(inventory)
+                    phi_bid, phi_ask = inv.order_sizes(inventory)
 
                     if strategy_type == 'optimal':
                         bid_q, ask_q = strategy.quotes_calibrated(s, inventory, t_norm)

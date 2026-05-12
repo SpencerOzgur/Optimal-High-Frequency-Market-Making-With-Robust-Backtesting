@@ -303,14 +303,17 @@ class WRDSLoader:
 
         trades_copy = trades_copy.set_index("timestamp").sort_index()
 
-        trade_prices = trades_copy.resample("1s")["price"].last().ffill()
-        trade_prices = trade_prices.replace([np.inf, -np.inf], np.nan).dropna()
-        trade_prices = trade_prices[trade_prices > 0]
-
-        if len(trade_prices) >= 2:
-            log_returns = np.diff(np.log(trade_prices.to_numpy(dtype=float)))
-            log_returns = log_returns[np.isfinite(log_returns)]
-            sigma = float(np.std(log_returns)) if len(log_returns) > 0 else 0.0
+        # Per-A-S Section 4: sigma is the instantaneous volatility of the
+        # MID-PRICE. Estimate it as std of arithmetic mid-price changes per
+        # second (dollar units), not log-returns of trade prints. Trade prints
+        # bounce on the bid-ask (inflates sigma for wide names) and are sparse
+        # in seconds with no print (ffill-zeros deflate sigma for thin names).
+        # `mid` here is the 1s-resampled NBBO mid built above at line 280.
+        mid_clean = mid[np.isfinite(mid) & (mid > 0)]
+        if len(mid_clean) >= 2:
+            mid_diffs = np.diff(mid_clean)
+            mid_diffs = mid_diffs[np.isfinite(mid_diffs)]
+            sigma = float(np.std(mid_diffs)) if len(mid_diffs) > 0 else 0.0
         else:
             sigma = 0.0
 
@@ -345,10 +348,23 @@ class WRDSLoader:
 # Calibration helpers
 # ---------------------------------------------------------------------------
 
-# returns a daily sigma value
+# Returns the daily DOLLAR sigma, averaged across loaded days.
+#
+#   per-day  sigma_dollar_per_sec = day["sigma"]   (stdev of 1-sec mid changes, $)
+#   per-day  sigma_dollar_per_day = sigma_dollar_per_sec * sqrt(23400)
+#   returned = mean across days of sigma_dollar_per_day
+#
+# day["sigma"] is now the per-second arithmetic stdev of mid-price changes in
+# dollars (see _process_day). Scaling to per-day via sqrt-time relies on iid
+# increments, which is the same assumption the A-S BM model makes.
 def estimate_sigma(market_data: dict) -> float:
-    sigmas = [day["sigma"] for day in market_data.values() if day is not None]
-    return float(np.mean(sigmas))*(23400**0.5) if sigmas else 0.0
+    dollar_sigmas = []
+    for day in market_data.values():
+        if day is None:
+            continue
+        sigma_dollar_per_day = float(day["sigma"]) * (23400 ** 0.5)
+        dollar_sigmas.append(sigma_dollar_per_day)
+    return float(np.mean(dollar_sigmas)) if dollar_sigmas else 0.0
 
 
 def calibrate_kappa(

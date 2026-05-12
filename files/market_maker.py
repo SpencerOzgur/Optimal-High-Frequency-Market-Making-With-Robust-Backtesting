@@ -14,6 +14,13 @@ Key equations from the paper:
 import numpy as np
 
 
+# Section 2.2 inventory order-size framework toggles.
+# Optimal and baseline are independent so you can A/B-test the framework
+# while holding the other side fixed.
+INVENTORY_MODEL_ENABLED          = True   # applies to the optimal strategy
+BASELINE_INVENTORY_MODEL_ENABLED = True    # applies to the baseline strategy
+
+
 class AvellanedaStoikov:
     """
     Optimal bid/ask quote-setting strategy from Avellaneda & Stoikov (2008).
@@ -142,27 +149,33 @@ class InventoryModel:
     eta : float
         Shape parameter controlling how quickly size decays with inventory.
         Paper uses eta = 0.005.
+    enabled : bool
+        If False, bid_size and ask_size always return phi_max regardless of q
+        (i.e. the Section 2.2 framework is disabled and order size is constant).
+        Useful for A/B testing the inventory framework.
     """
 
-    def __init__(self, phi_max: float = 100.0, eta: float = 0.005):
+    def __init__(self, phi_max: float = 100.0, eta: float = 0.005,
+                 enabled: bool = INVENTORY_MODEL_ENABLED):
         self.phi_max = phi_max
         self.eta = eta
+        self.enabled = enabled
 
     def bid_size(self, q: float) -> float:
         """
         Bid (buy) order size. Reduced when already long (q > 0).
         """
-        if q > 0:
-            return self.phi_max * np.exp(-self.eta * q)
-        return self.phi_max
+        if not self.enabled or q <= 0:
+            return self.phi_max
+        return self.phi_max * np.exp(-self.eta * q)
 
     def ask_size(self, q: float) -> float:
         """
         Ask (sell) order size. Reduced when already short (q < 0).
         """
-        if q < 0:
-            return self.phi_max * np.exp(self.eta * q)   # q<0, so eta*q<0, exp<1
-        return self.phi_max
+        if not self.enabled or q >= 0:
+            return self.phi_max
+        return self.phi_max * np.exp(self.eta * q)   # q<0, so eta*q<0, exp<1
 
     def order_sizes(self, q: float):
         """

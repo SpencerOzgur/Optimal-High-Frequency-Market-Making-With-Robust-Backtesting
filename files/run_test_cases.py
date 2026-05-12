@@ -15,7 +15,8 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from market_maker import AvellanedaStoikov, InventoryModel, BaselineStrategy
+from market_maker import (AvellanedaStoikov, InventoryModel, BaselineStrategy,
+                           INVENTORY_MODEL_ENABLED, BASELINE_INVENTORY_MODEL_ENABLED)
 from replay_simulator import ReplaySimulator
 from helpers import fill_analysis
 
@@ -124,9 +125,9 @@ check("AMZN: spread is flat at B=close_spread all day",
 # InventoryModel
 # ===========================================================================
 
-print("\n--- InventoryModel ---")
+print("\n--- InventoryModel (enabled=True) ---")
 
-inv = InventoryModel(phi_max=100.0, eta=0.005)
+inv = InventoryModel(phi_max=100.0, eta=0.005, enabled=True)
 
 check("bid_size = phi_max when q=0",
       inv.bid_size(0) == 100.0)
@@ -171,6 +172,52 @@ check("order_sizes returns (bid_size, ask_size)",
       b == inv.bid_size(100) and a == inv.ask_size(100))
 
 
+# --- Section 2.2 toggle (enabled=False) ---
+
+print("\n--- InventoryModel (enabled=False) ---")
+
+inv_off = InventoryModel(phi_max=100.0, eta=0.005, enabled=False)
+
+check("disabled: bid_size = phi_max when q=0",
+      inv_off.bid_size(0) == 100.0)
+
+check("disabled: bid_size stays phi_max when q>0 (no decay)",
+      inv_off.bid_size(200) == 100.0,
+      f"bid_size(200)={inv_off.bid_size(200)}")
+
+check("disabled: ask_size stays phi_max when q<0 (no decay)",
+      inv_off.ask_size(-200) == 100.0,
+      f"ask_size(-200)={inv_off.ask_size(-200)}")
+
+check("disabled: bid_size constant across extreme inventory",
+      inv_off.bid_size(0) == inv_off.bid_size(10_000) == 100.0)
+
+check("disabled: ask_size constant across extreme inventory",
+      inv_off.ask_size(0) == inv_off.ask_size(-10_000) == 100.0)
+
+check("disabled: order_sizes returns (phi_max, phi_max) at any q",
+      inv_off.order_sizes(500) == (100.0, 100.0))
+
+
+# --- Module-level toggle constants ---
+
+print("\n--- Inventory toggle constants ---")
+
+check("INVENTORY_MODEL_ENABLED is a bool",
+      isinstance(INVENTORY_MODEL_ENABLED, bool),
+      f"type={type(INVENTORY_MODEL_ENABLED).__name__}")
+
+check("BASELINE_INVENTORY_MODEL_ENABLED is a bool",
+      isinstance(BASELINE_INVENTORY_MODEL_ENABLED, bool),
+      f"type={type(BASELINE_INVENTORY_MODEL_ENABLED).__name__}")
+
+# Default of the `enabled` kwarg should track the module constant
+inv_default = InventoryModel(phi_max=100.0, eta=0.005)
+check("InventoryModel default enabled tracks INVENTORY_MODEL_ENABLED",
+      inv_default.enabled == INVENTORY_MODEL_ENABLED,
+      f"inv.enabled={inv_default.enabled}  const={INVENTORY_MODEL_ENABLED}")
+
+
 # ===========================================================================
 # BaselineStrategy
 # ===========================================================================
@@ -195,47 +242,56 @@ print("\n--- ReplaySimulator fill logic ---")
 
 sim = ReplaySimulator()
 
+# Signature: _check_bid_fill(bid_price, bid_size, trades, queue_ahead, queue_model)
+# Returns: (filled, fill_size, queue_ahead)
+# 'front' queue model = best case (queue_ahead ignored), matches paper baseline.
+def bid_fill(bid_price, bid_size, trades, queue_ahead=0.0, queue_model='front'):
+    return sim._check_bid_fill(bid_price, bid_size, trades, queue_ahead, queue_model)
+
+def ask_fill(ask_price, ask_size, trades, queue_ahead=0.0, queue_model='front'):
+    return sim._check_ask_fill(ask_price, ask_size, trades, queue_ahead, queue_model)
+
 # --- _check_bid_fill ---
 
 # Trade below our bid: should fill
 t = pd.DataFrame({'price': [144.90], 'size': [200.0]})
-filled, sz = sim._check_bid_fill(145.00, 100.0, t)
+filled, sz, _ = bid_fill(145.00, 100.0, t)
 check("bid filled when trade price < bid price",
       filled and sz > 0,
       f"filled={filled} size={sz}")
 
 # Trade at exactly our bid: should fill
 t = pd.DataFrame({'price': [145.00], 'size': [200.0]})
-filled, sz = sim._check_bid_fill(145.00, 100.0, t)
+filled, sz, _ = bid_fill(145.00, 100.0, t)
 check("bid filled when trade price = bid price",
       filled and sz > 0)
 
 # Trade above our bid: should not fill
 t = pd.DataFrame({'price': [145.10], 'size': [200.0]})
-filled, sz = sim._check_bid_fill(145.00, 100.0, t)
+filled, sz, _ = bid_fill(145.00, 100.0, t)
 check("bid NOT filled when trade price > bid price",
       not filled)
 
 # Fill size capped at our order size
 t = pd.DataFrame({'price': [144.90], 'size': [500.0]})
-filled, sz = sim._check_bid_fill(145.00, 100.0, t)
+filled, sz, _ = bid_fill(145.00, 100.0, t)
 check("bid fill size capped at order size",
       sz == 100.0,
       f"fill_size={sz}")
 
 # Fill size capped at available volume
 t = pd.DataFrame({'price': [144.90], 'size': [30.0]})
-filled, sz = sim._check_bid_fill(145.00, 100.0, t)
+filled, sz, _ = bid_fill(145.00, 100.0, t)
 check("bid fill size capped at available volume when volume < order size",
       sz == 30.0,
       f"fill_size={sz}")
 
 # No trades: no fill
-filled, sz = sim._check_bid_fill(145.00, 100.0, None)
+filled, sz, _ = bid_fill(145.00, 100.0, None)
 check("bid no fill when no trades",
       not filled)
 
-filled, sz = sim._check_bid_fill(145.00, 100.0, pd.DataFrame(columns=['price', 'size']))
+filled, sz, _ = bid_fill(145.00, 100.0, pd.DataFrame(columns=['price', 'size']))
 check("bid no fill when empty trades DataFrame",
       not filled)
 
@@ -243,43 +299,59 @@ check("bid no fill when empty trades DataFrame",
 
 # Trade above our ask: should fill
 t = pd.DataFrame({'price': [145.10], 'size': [200.0]})
-filled, sz = sim._check_ask_fill(145.00, 100.0, t)
+filled, sz, _ = ask_fill(145.00, 100.0, t)
 check("ask filled when trade price > ask price",
       filled and sz > 0,
       f"filled={filled} size={sz}")
 
 # Trade at exactly our ask: should fill
 t = pd.DataFrame({'price': [145.00], 'size': [200.0]})
-filled, sz = sim._check_ask_fill(145.00, 100.0, t)
+filled, sz, _ = ask_fill(145.00, 100.0, t)
 check("ask filled when trade price = ask price",
       filled and sz > 0)
 
 # Trade below our ask: should not fill
 t = pd.DataFrame({'price': [144.90], 'size': [200.0]})
-filled, sz = sim._check_ask_fill(145.00, 100.0, t)
+filled, sz, _ = ask_fill(145.00, 100.0, t)
 check("ask NOT filled when trade price < ask price",
       not filled)
 
 # Fill size capped at order size
 t = pd.DataFrame({'price': [145.10], 'size': [500.0]})
-filled, sz = sim._check_ask_fill(145.00, 100.0, t)
+filled, sz, _ = ask_fill(145.00, 100.0, t)
 check("ask fill size capped at order size",
       sz == 100.0,
       f"fill_size={sz}")
 
 # Multiple trades: aggregate volume
 t = pd.DataFrame({'price': [144.85, 144.90, 144.95], 'size': [20.0, 30.0, 40.0]})
-filled, sz = sim._check_bid_fill(145.00, 100.0, t)
+filled, sz, _ = bid_fill(145.00, 100.0, t)
 check("bid fill aggregates volume across multiple qualifying trades",
       filled and sz == 90.0,
       f"fill_size={sz}")
 
 # Only qualifying trades count
 t = pd.DataFrame({'price': [144.90, 145.10], 'size': [30.0, 50.0]})
-filled, sz = sim._check_bid_fill(145.00, 100.0, t)
+filled, sz, _ = bid_fill(145.00, 100.0, t)
 check("bid fill only counts trades at or below bid price",
       filled and sz == 30.0,
       f"fill_size={sz}")
+
+# --- queue_model='back': queue_ahead consumed before fills ---
+
+# All addressable volume consumed by queue ahead -> no fill
+t = pd.DataFrame({'price': [144.90], 'size': [50.0]})
+filled, sz, qa_after = bid_fill(145.00, 100.0, t, queue_ahead=200.0, queue_model='back')
+check("back queue: no fill when queue_ahead > addressable volume",
+      not filled and qa_after == 150.0,
+      f"filled={filled} sz={sz} qa_after={qa_after}")
+
+# Queue ahead partially consumed; remainder fills our order
+t = pd.DataFrame({'price': [144.90], 'size': [200.0]})
+filled, sz, qa_after = bid_fill(145.00, 100.0, t, queue_ahead=50.0, queue_model='back')
+check("back queue: partial queue consumption leaves room to fill",
+      filled and sz == 100.0 and qa_after == 0.0,
+      f"sz={sz} qa_after={qa_after}")
 
 
 # ===========================================================================
