@@ -30,11 +30,11 @@ DATES = [
 
 # Risk aversion parameter tuned per asset
 GAMMA_PARAMS = {
-    'AAPL': 1.78e-7,
-    'AMZN': 1.42e-7,
-    'GE':   9.02e-5,
-    'IVV':  1.23e-9,
-    'M':    3.33e-4,
+    'AAPL': .01,
+    'AMZN': .015,
+    'GE':   .01,
+    'IVV':  .01,
+    'M':    .01,
 }
 
 # Parameters turned via calibrate_params.py + manual adjustments

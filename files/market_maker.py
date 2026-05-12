@@ -17,6 +17,7 @@ import numpy as np
 # Stanford (2018) section 2.2 inventory order-size framework toggles
 INVENTORY_MODEL_ENABLED          = True   # applies to optimal
 BASELINE_INVENTORY_MODEL_ENABLED = True    # applies to baseline
+LOT_SIZE = 100
 
 
 class AvellanedaStoikov:
@@ -45,7 +46,7 @@ class AvellanedaStoikov:
 
     def indifference_price(self, s: float, q: float, t: float) -> float:
         gs2 = getattr(self, 'gamma_sigma2', self.gamma * self.sigma ** 2)
-        return s - q * gs2 * (self.T - t)
+        return s - (q / LOT_SIZE) * gs2 * (self.T - t)
 
     def optimal_spread(self, t: float) -> float:
         gs2 = getattr(self, 'gamma_sigma2', self.gamma * self.sigma ** 2)
