@@ -3,11 +3,6 @@ run_with_wrds.py
 ================
 End-to-end runner: WRDS TAQ data → replay simulator → results tables + plots.
 
-Run this file directly:
-    python run_with_wrds.py
-
-You will be prompted for your WRDS credentials on first run.
-Credentials are saved to ~/.pgpass so you won't be prompted again.
 """
 
 import numpy as np
@@ -22,12 +17,9 @@ from market_maker import AvellanedaStoikov, InventoryModel, BaselineStrategy
 from replay_simulator import ReplaySimulator
 from helpers import summarise_results, summarise_order_stats, print_fill_analysis, export_quote_position_xlsx, export_fill_stats_xlsx
 
-# ---------------------------------------------------------------------------
-# Configuration — matches the paper exactly
-# ---------------------------------------------------------------------------
-
 TICKERS = ['AAPL', 'AMZN', 'GE', 'IVV', 'M']
 
+# Trading dates
 DATES = [
     '2017-06-12',
     '2017-06-13',
@@ -36,19 +28,16 @@ DATES = [
     '2017-06-16',
 ]
 
+# Risk aversion parameter tuned per asset
 GAMMA_PARAMS = {
-    'AAPL': 1e-7,    # plateau, any γ ≤ 1e-6 gives same +$584
-    'AMZN': 1e-7,    # right-pole — only profitable mode for this ticker
-    'GE':   1e-5,    # slight peak at this gs2 ≈ 1.8e-5
-    'IVV':  1e-9,    # plateau at small γ
-    'M':    3e-4, # genuine narrow sweet spot at +$32
+    'AAPL': 1.78e-7,
+    'AMZN': 1.42e-7,
+    'GE':   9.02e-5,
+    'IVV':  1.23e-9,
+    'M':    3.33e-4,
 }
 
-
-# Per-ticker kappa fit by `python3 files/calibrate_params.py` on the prior
-# week (2017-06-05..2017-06-09). Re-run that script and paste the new
-# values below if you change tickers, dates, or the venue map.
-
+# Parameters turned via calibrate_params.py + manual adjustments
 KAPPA_PARAMS = {
     'AAPL': 81.81,
     'AMZN': 7.57,
@@ -57,26 +46,16 @@ KAPPA_PARAMS = {
     'M':    111.899,
 }
 
-# ---------------------------------------------------------------------------
-# Intra-spread Poisson-uplift fill model (per ticker).
-# ---------------------------------------------------------------------------
-# When the optimal strategy posts INSIDE the BBO, we can't observe the extra
-# aggressors that would have come at our improved price (midpoint matches,
-# hidden orders, price-improvement flow). The replay simulator augments the
-# historical-trade fill check with a Poisson process whose rate decays
-# exponentially with depth from mid:
-#
-#     λ(ξ) = A * exp(-ξ / b),       Δλ = λ(ξ_our) - λ(ξ_best)
-#
-# A is fills/sec at the mid; b is the Laplace scale (decay width) in dollars.
-#
-# Values below were fit by `python3 files/calibrate_params.py`, which runs
-# the textbook AS exponential fit on STRICTLY intra-spread prints from the
-# week PRIOR to the evaluation window (2017-06-05..2017-06-09), using the
-# same TICKER_VENUE / addressable-flow filters the simulator matches
-# against. Re-run that script and paste the new table below if you change
-# tickers, dates, or the venue map.
-# ---------------------------------------------------------------------------
+"""
+Laplace distribution for fills inside bbo:
+
+λ(ξ) = A * exp(-ξ / b),       Δλ = λ(ξ_our) - λ(ξ_best)
+A is fills/sec at the mid; b is the Laplace scale (decay width) in dollars.
+
+Parameters turned via calibrate_params.py + manual adjustments
+
+"""
+
 A_PARAMS = {
     'AAPL': 0.23980,
     'AMZN': 0.02740,
@@ -98,6 +77,16 @@ ETA     = 0.005
 
 CACHE_PATH = 'sheets/raw_data.pkl'
 CACHE_PATH_RESULTS = 'sheets/results.pkl'
+
+# Calibration dates for sigma
+CALIB_DATES = [
+    '2017-06-05',
+    '2017-06-06',
+    '2017-06-07',
+    '2017-06-08',
+    '2017-06-09',
+]
+CACHE_PATH_CALIB = 'sheets/raw_data_calib.pkl'
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +110,20 @@ def run_wrds_experiment(tickers=TICKERS, dates=DATES):
         with open(CACHE_PATH, 'wb') as f:
             pickle.dump(raw_data, f)
         print("Fetched from WRDS and cached.")
+
+    # Prior-week sigma calibration data (separate cache so eval and calib
+    # weeks stay decoupled). Fetch on first use; reuse after.
+    try:
+        with open(CACHE_PATH_CALIB, 'rb') as f:
+            calib_data = pickle.load(f)
+        print(f"Loaded calibration-week data from {CACHE_PATH_CALIB}.")
+    except FileNotFoundError:
+        loader = WRDSLoader()
+        calib_data = loader.load_week(tickers=tickers, dates=CALIB_DATES)
+        loader.close()
+        with open(CACHE_PATH_CALIB, 'wb') as f:
+            pickle.dump(calib_data, f)
+        print(f"Fetched calibration week from WRDS and cached at {CACHE_PATH_CALIB}.")
     print()
 
     # 2. Build strategies and run simulation for each ticker
@@ -137,7 +140,7 @@ def run_wrds_experiment(tickers=TICKERS, dates=DATES):
     best_ask_dict = {}
 
     for ticker in tickers:
-        # Estimate spreads empirically from actual data
+        # Estimate spreads empirically from data
         open_spreads = []
         close_spreads = []
         all_spreads = []
@@ -153,15 +156,16 @@ def run_wrds_experiment(tickers=TICKERS, dates=DATES):
 
         median_spread = float(np.nanmedian(np.concatenate(all_spreads)))
 
-        # Per-ticker kappa is loaded from KAPPA_PARAMS above (calibrated
-        # offline by files/calibrate_params.py on the prior week).
+        # Per-ticker kappa is loaded from KAPPA_PARAMS
         venue_label = TICKER_VENUE.get(ticker, "NBBO")
         print(f"  {ticker} [{venue_label}]: empirical open_spread={open_spread:.4f} "
               f"close_spread={close_spread:.4f} "
               f"median_spread={median_spread:.4f} kappa={KAPPA_PARAMS[ticker]:.2f}")
 
-        sigma = estimate_sigma({d: raw_data[ticker][d]
-                                for d in dates if raw_data[ticker][d]})
+        # Calibrate sigma off the PRIOR week
+        sigma = estimate_sigma({d: calib_data[ticker][d]
+                                for d in CALIB_DATES
+                                if calib_data.get(ticker, {}).get(d)})
 
 
 
@@ -172,7 +176,10 @@ def run_wrds_experiment(tickers=TICKERS, dates=DATES):
             T=1.0,
         )
 
-        #Incorrect calibration logic
+        """
+        Toggle for Stanford paper-style calibration:
+        """
+        #
         #as_model.calibrate_from_market(open_spread, close_spread)
         #as_model.gamma_sigma2 = as_model.gamma_sigma2 / 23400.0
 
@@ -191,10 +198,7 @@ def run_wrds_experiment(tickers=TICKERS, dates=DATES):
 
             print(f"    {ticker} {date}...", end=" ", flush=True)
 
-            # Per-ticker A/b for the intra-spread Poisson uplift (see
-            # A_PARAMS/B_PARAMS module-level docstring). Same values flow
-            # into every (strategy, queue_model) combination so common
-            # random numbers across runs are honoured.
+            # Per-ticker A/b for fills inside bbo
             a_t = A_PARAMS[ticker]
             b_t = B_PARAMS[ticker]
 

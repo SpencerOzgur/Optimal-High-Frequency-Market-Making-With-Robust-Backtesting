@@ -99,35 +99,8 @@ def summarise_order_stats(all_results: Dict) -> Tuple[pd.DataFrame, pd.DataFrame
     return pd.DataFrame(rows_opt), pd.DataFrame(rows_base)
 
 
-# ---------------------------------------------------------------------------
-# Fill analysis (replaces Markov chain from Section 4.2 of the paper)
-# ---------------------------------------------------------------------------
-#
-# WHY WE REPLACED THE MARKOV CHAIN:
-#
-# The paper's Markov chain analysis was designed for a *generative* simulator
-# where order arrivals were drawn from a Poisson process. In that setting,
-# transition probabilities like p(0,2) — both sides fill in one second — were
-# genuine forward-looking probabilities arising from the Poisson intensity,
-# and the formula p* = p(0,2) + sum p(0,1)*p(1,1)^n*p(1,2) made sense as an
-# analytic expression for the spread-capture probability under that model.
-#
-# With TAQ replay, fills are deterministic given the historical data: for a
-# specific day, our bid either got crossed by a real trade or it didn't. There
-# is no probability to estimate — only frequencies to count. Fitting a Markov
-# chain to these frequencies and then applying the geometric waiting-time
-# formula would give numbers that look like probabilities but aren't: the
-# underlying assumption of memoryless transitions is violated because real
-# market order flow has intraday patterns and serial correlation.
-#
-# We therefore replace the Markov chain with direct empirical statistics
-# computed from the fills list. These are honest about what the replay
-# simulation actually measures: observed rates over the specific week simulated,
-# not forward-looking probabilities for future trading days.
-#
-# The quantities reported are directly comparable to Tables 7 and 8 of the
-# paper as performance metrics — they just have a cleaner interpretation.
-# ---------------------------------------------------------------------------
+
+# Fill analysis (replaces Markov chain from Section 4.2 of the Stanford paper
 
 def fill_analysis(result_days: List) -> Dict:
     """

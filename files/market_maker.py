@@ -1,10 +1,10 @@
 """
 market_maker.py
 ===============
-Implements the Avellaneda-Stoikov (2008) high-frequency market making model
-combined with a proprietary dynamic order-size inventory control model.
+Implements the A-S (2008) high-frequency market making model
+combined with Stanford (2018) inventory control model
 
-Key equations from the paper:
+Key equations from A-S:
   Indifference price:  r(s,t) = s - q * gamma * sigma^2 * (T - t)
   Optimal spread:      delta_a + delta_b = gamma*sigma^2*(T-t) + ln(1 + gamma/kappa)
   Order size (bid):    phi_bid = phi_max * exp(-eta * q)  if q > 0, else phi_max
@@ -14,16 +14,14 @@ Key equations from the paper:
 import numpy as np
 
 
-# Section 2.2 inventory order-size framework toggles.
-# Optimal and baseline are independent so you can A/B-test the framework
-# while holding the other side fixed.
-INVENTORY_MODEL_ENABLED          = True   # applies to the optimal strategy
-BASELINE_INVENTORY_MODEL_ENABLED = True    # applies to the baseline strategy
+# Stanford (2018) section 2.2 inventory order-size framework toggles
+INVENTORY_MODEL_ENABLED          = True   # applies to optimal
+BASELINE_INVENTORY_MODEL_ENABLED = True    # applies to baseline
 
 
 class AvellanedaStoikov:
     """
-    Optimal bid/ask quote-setting strategy from Avellaneda & Stoikov (2008).
+    Optimal bid/ask quote-setting strategy from A-S (2008).
 
     Parameters
     ----------
@@ -36,7 +34,7 @@ class AvellanedaStoikov:
         Not used as a Poisson intensity parameter in this implementation — we use
         real TAQ trades for fills instead.
     T : float
-        Terminal time horizon (in the same units as t). Typically 1 trading day = 1.0.
+        Terminal time horizon (in the same units as t). In our case 1 trading day (1.0).
     """
 
     def __init__(self, gamma: float, sigma: float, kappa: float, T: float = 1.0):
@@ -70,6 +68,7 @@ class AvellanedaStoikov:
         ask_price = r + half_spread
         return bid_price, ask_price
 
+    # Used in synthetic, but not empirical runs
     def calibrate_from_market(self, open_spread: float, close_spread: float):
         """
         Calibrate (gamma * sigma^2) and kappa from observed opening/closing spreads.
@@ -130,7 +129,7 @@ class InventoryModel:
     Proprietary dynamic order-size model to control inventory risk.
 
     Unlike Guéant et al. (2013) who stop quoting at inventory limits, this model
-    *keeps trading* but reduces order size in the direction of excess accumulation.
+    keeps trading but reduces order size in the direction of excess accumulation.
 
     Order size equations:
         phi_bid = phi_max * exp(-eta * q)   if q > 0  (long: reduce buy size)

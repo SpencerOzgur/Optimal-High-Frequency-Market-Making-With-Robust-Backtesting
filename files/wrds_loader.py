@@ -1,21 +1,16 @@
 """
 wrds_loader.py
 ==============
-Loads and cleans TAQ data from WRDS for the Avellaneda-Stoikov simulator.
-
-Requires:
-    pip install wrds pandas numpy scipy
+Loads and cleans TAQ data from WRDS for the A-S simulator.
 
 WRDS TAQ tables used:
     taqmsec.ctm_YYYYMMDD  — Consolidated Trades (millisecond)
     taqmsec.cqm_YYYYMMDD  — Consolidated Quotes (millisecond)
 
-Trade filtering follows the addressable-flow universe documented in
-taq_fill_universe.md: a print is "addressable" iff it is uncorrected,
-on-exchange, regular-hours, and carries only the regular/ISO/auto-ex sale
-condition codes. This drops FINRA TRF (off-exchange) volume and the long
-tail of auction / contingent / late / odd-lot / extended-hours prints that
-could not have hit a lit displayed quote.
+A print is "addressable" iff it is uncorrected, on-exchange, regular-hours, 
+and carries only the regular/ISO/auto-ex sale condition codes. This drops 
+FINRA TRF (off-exchange) volume and the long tail of auction / contingent / 
+late / odd-lot / extended-hours prints that could not have hit a lit quote.
 """
 
 import numpy as np
@@ -23,7 +18,6 @@ import pandas as pd
 from typing import Dict, List, Tuple
 import warnings
 
-# Remove error msgs from output
 warnings.filterwarnings("ignore", message=".*ChainedAssignmentError.*")
 
 try:
@@ -33,20 +27,12 @@ except ImportError:
     WRDS_AVAILABLE = False
     warnings.warn("wrds package not installed. Run: pip install wrds")
 
-
 MARKET_OPEN  = pd.Timestamp("09:30:00").time()
 MARKET_CLOSE = pd.Timestamp("16:00:00").time()
 T_SECONDS    = 23400.0
 
 BAD_QUOTE_CONDITIONS = {"C", "U", "D", "B", "W", "X", "Y"}
 
-# Per-ticker single-venue restriction (largest-volume venue from
-# exchange_diagnostics output). When a ticker appears here both quote and
-# trade SQL queries are filtered to ex = TICKER_VENUE[ticker]:
-#   - the trade fill universe is restricted to prints reported by that venue
-#   - the "BBO" the simulator sees is that venue's BBO (NOT the consolidated
-#     NBBO), since natbbo_ind is dropped from the quote filter when a venue
-#     is pinned. A ticker without an entry falls back to NBBO across all venues.
 TICKER_VENUE = {
     'AAPL': 'Q',   # NASDAQ
     'AMZN': 'Q',   # NASDAQ
@@ -54,7 +40,6 @@ TICKER_VENUE = {
     'IVV':  'P',   # NYSE Arca
     'M':    'T',   # NASDAQ (trading NYSE-listed)
 }
-
 
 class WRDSLoader:
     """
@@ -146,8 +131,6 @@ class WRDSLoader:
         elif "ofrsiz" in cols:
             asksiz_col = "ofrsiz"
         else:
-            # Size is useful but not essential for your current processing.
-            # If neither exists, return NULL as asksiz.
             asksiz_col = None
 
         return ask_col, asksiz_col
@@ -162,9 +145,12 @@ class WRDSLoader:
         ask_col, asksiz_col = self._get_quote_schema(table)
         asksiz_expr = f"{asksiz_col} AS asksiz" if asksiz_col else "NULL AS asksiz"
 
-        # If the ticker is pinned to a single venue, restrict the quote stream
-        # to that venue's BBO updates. Otherwise fall back to NBBO-eligible
-        # rows from all venues (the historical behaviour).
+        """
+        If the ticker is pinned to a single venue, restrict the quote stream
+        to that venue's BBO updates. Otherwise fall back to NBBO-eligible
+        rows from all venues (the historical behaviour).
+        """
+        
         venue = TICKER_VENUE.get(ticker)
         venue_clause = f"AND ex = '{venue}'" if venue else ""
 
@@ -195,9 +181,11 @@ class WRDSLoader:
         if "qu_cond" in df.columns:
             df = df[~df["qu_cond"].isin(BAD_QUOTE_CONDITIONS)]
 
-        # Only apply the NBBO-eligibility filter when no venue is pinned.
-        # When a venue IS pinned, every kept row IS that venue's BBO update —
-        # filtering to natbbo_ind would silently drop valid venue-BBO ticks.
+        """
+        Only apply the NBBO-eligibility filter when no venue is pinned.
+        When a venue IS pinned, every kept row IS that venue's BBO update —
+        filtering to natbbo_ind would silently drop valid venue-BBO ticks.
+        """
         if venue is None and "natbbo_ind" in df.columns:
             df = df[df["natbbo_ind"].isin(["1", "4", 1, 4])]
 
@@ -205,19 +193,6 @@ class WRDSLoader:
         return df
 
     def _load_trades(self, ticker: str, date: str) -> pd.DataFrame:
-        """
-        Pull addressable-flow trades only — see taq_fill_universe.md.
-
-        SQL filter:
-          - tr_corr = '00'                   (uncorrected)
-          - ex constraint:
-              * ticker pinned in TICKER_VENUE  -> ex = TICKER_VENUE[ticker]
-                (subsumes the "drop FINRA TRF" rule, since D is excluded).
-              * otherwise                       -> ex <> 'D'
-          - 09:30 <= time_m < 16:00          (regular hours)
-          - tr_scond chars all in {' ','@','F','E'}  (regular / ISO / auto-ex only)
-            NULL tr_scond is treated as regular and passes.
-        """
         table = f"taqmsec.ctm_{date.replace('-', '')}"
 
         venue = TICKER_VENUE.get(ticker)
@@ -303,12 +278,9 @@ class WRDSLoader:
 
         trades_copy = trades_copy.set_index("timestamp").sort_index()
 
-        # Per-A-S Section 4: sigma is the instantaneous volatility of the
-        # MID-PRICE. Estimate it as std of arithmetic mid-price changes per
-        # second (dollar units), not log-returns of trade prints. Trade prints
-        # bounce on the bid-ask (inflates sigma for wide names) and are sparse
-        # in seconds with no print (ffill-zeros deflate sigma for thin names).
-        # `mid` here is the 1s-resampled NBBO mid built above at line 280.
+        # Instantaneous vol of mid-price estimation
+        # std of arithmetic mid-price changes per second
+        # `mid` here is 1s-resampled NBBO mid
         mid_clean = mid[np.isfinite(mid) & (mid > 0)]
         if len(mid_clean) >= 2:
             mid_diffs = np.diff(mid_clean)
@@ -354,9 +326,9 @@ class WRDSLoader:
 #   per-day  sigma_dollar_per_day = sigma_dollar_per_sec * sqrt(23400)
 #   returned = mean across days of sigma_dollar_per_day
 #
-# day["sigma"] is now the per-second arithmetic stdev of mid-price changes in
+# day["sigma"] is the per-second arithmetic stdev of mid-price changes in
 # dollars (see _process_day). Scaling to per-day via sqrt-time relies on iid
-# increments, which is the same assumption the A-S BM model makes.
+# increments, which is same assumption from A-S BM model.
 def estimate_sigma(market_data: dict) -> float:
     dollar_sigmas = []
     for day in market_data.values():
@@ -366,36 +338,24 @@ def estimate_sigma(market_data: dict) -> float:
         dollar_sigmas.append(sigma_dollar_per_day)
     return float(np.mean(dollar_sigmas)) if dollar_sigmas else 0.0
 
+"""
+    A-S calibration (regression) of kappa from observed market trades.
 
+    lambda(delta) = A * exp(-kappa * delta)
+    log lambda(delta) = log(A) - kappa * delta
+
+    linear regression of log(arrival_rate) on bin-center delta has
+    slope -kappa.
+
+    Returns kappa fitted from the exponential decay of trade arrivals vs depth
+    from the mid. Falls back to 2/median_depth if the regression degenerates.
+"""
 def calibrate_kappa(
     market_data: dict,
     n_bins: int = 20,
     rng_seed: int = 42,
 ) -> float:
-    """
-    Textbook Avellaneda-Stoikov calibration of kappa from observed market trades.
 
-    Returns kappa fitted from the exponential decay of trade arrivals vs depth
-    from the mid. Falls back to 2/median_depth if the regression degenerates.
-    """
-    # ----------------------------------------------------------------------
-    # Model (the arrival intensity of marketable orders decays exponentially
-    # with depth delta from mid):
-    #     lambda(delta) = A * exp(-kappa * delta)
-    #     log lambda(delta) = log(A) - kappa * delta
-    #
-    # a linear regression of log(arrival_rate) on bin-center delta has
-    # slope -kappa.
-    #
-    # Aggressor-side rule (per spec):
-    #     price > mid  -> buy aggressor   (lifted the offer)
-    #     price < mid  -> sell aggressor  (hit the bid)
-    #     price = mid  -> random          (symmetric coin flip)
-    #
-    # Under AS the LOB is assumed symmetric, so kappa is fitted from the
-    # pooled |delta|; the random side assignment for at-mid trades is for
-    # explicit-side semantics and does not affect the pooled fit.
-    # ----------------------------------------------------------------------
     rng = np.random.default_rng(rng_seed)
 
     all_depths: List[np.ndarray] = []
@@ -433,8 +393,8 @@ def calibrate_kappa(
     if len(depths) < 2:
         return 200.0
 
-    # Bin range: 0 to 95th percentile of observed depths. Trimming the long
-    # tail keeps a few far-away prints from anchoring the log-linear fit.
+    # Bin range: 0 to 95th percentile of observed depths
+    # Prevents far prints from anchoring the log-linear fit
     max_depth = float(np.percentile(depths, 95))
     if max_depth <= 0:
         return 200.0
@@ -443,10 +403,8 @@ def calibrate_kappa(
     counts, _ = np.histogram(depths, bins=bin_edges)
     centres = 0.5 * (bin_edges[:-1] + bin_edges[1:])
 
-    # Per-second arrival rate per bin = count / total session seconds.
-    # (Bin width and total seconds are constants → they shift only the
-    # intercept of the log-linear fit, not the slope, so normalising
-    # is for interpretability rather than mathematical necessity.)
+    # Per-second arrival rate per bin = count / total session seconds
+    # Normalize for interpretability
     total_seconds = n_valid_days * T_SECONDS
     rates = counts / total_seconds
 
@@ -455,7 +413,7 @@ def calibrate_kappa(
         median_depth = float(np.median(depths))
         return 2.0 / median_depth if median_depth > 0 else 200.0
 
-    # OLS:  log(rate) = log(A) - kappa * delta   ⇒   slope = -kappa
+    # OLS:  log(rate) = log(A) - kappa * delta; slope = -kappa
     log_rates = np.log(rates[keep])
     slope, _ = np.polyfit(centres[keep], log_rates, 1)
     kappa = -float(slope)
@@ -483,24 +441,6 @@ def calibrate_poisson_uplift(
         λ(ξ) = A * exp(-ξ / b)
 
     log λ is linear in ξ with slope (-1/b) and intercept log(A).
-
-    ----------------------------------------------------------------
-    Why intra-spread prints?
-    ----------------------------------------------------------------
-    The replay simulator already credits the strategy with all observed
-    historical prints at-or-beyond its quote price.  The Poisson uplift
-    is meant to capture the *additional* flow that would attract an
-    improved (inside-the-BBO) quote — the kind that doesn't normally
-    print on the lit touch.  The cleanest historical proxy for that
-    flow is precisely the set of trades that printed STRICTLY between
-    best_bid and best_ask: midpoint matches, hidden-order fills,
-    sub-penny price-improvement, dark-pool prints reported by the
-    venue, etc.  We fit (A, b) on those.
-
-    The same TICKER_VENUE filter that the simulator runs against
-    applies upstream when these market_trades were loaded, so the
-    calibration sees the same trade universe the simulator matches
-    against — not a contaminated cross-venue mix.
 
     ----------------------------------------------------------------
     Procedure
@@ -552,9 +492,8 @@ def calibrate_poisson_uplift(
 
         prices = trades["price"].to_numpy(dtype=float)
 
-        # Strictly intra-spread (excludes prints that hit the touch on
-        # either side — those are the OBSERVED flow the simulator already
-        # matches against and would be double-counted if included here).
+        # Strictly intra-spread
+        # Excludes prints that hit the touch on either side
         intra = (prices > bb_at) & (prices < ba_at)
         if not intra.any():
             continue
