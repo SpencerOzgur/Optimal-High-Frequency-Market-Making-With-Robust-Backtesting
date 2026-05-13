@@ -19,10 +19,10 @@ into A_PARAMS / B_PARAMS in run_with_wrds.py (manually).
 
 Usage
 -----
-    python3 files/calibrate_params.py
-    python3 files/calibrate_params.py --tickers AAPL,GE
-    python3 files/calibrate_params.py --dates 2017-06-05,2017-06-06,...
-    python3 files/calibrate_params.py --no-cache       # force WRDS refetch
+    python3 source/calibrate_params.py
+    python3 source/calibrate_params.py --tickers AAPL,GE
+    python3 source/calibrate_params.py --dates 2017-06-05,2017-06-06,...
+    python3 source/calibrate_params.py --no-cache       # force WRDS refetch
 """
 
 import argparse

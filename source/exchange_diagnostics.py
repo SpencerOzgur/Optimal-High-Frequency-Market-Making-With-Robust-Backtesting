@@ -9,9 +9,9 @@ percentage of rows.
                  processing so it is not in the cache.
 
 Run from project root:
-    python3 files/exchange_diagnostics.py
-    python3 files/exchange_diagnostics.py --no-bbo   # trades only, skip WRDS
-    python3 files/exchange_diagnostics.py --cache other.pkl
+    python3 source/exchange_diagnostics.py
+    python3 source/exchange_diagnostics.py --no-bbo   # trades only, skip WRDS
+    python3 source/exchange_diagnostics.py --cache other.pkl
 """
 
 import argparse

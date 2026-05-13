@@ -6,9 +6,9 @@ from the cached `sheets/raw_data.pkl`. One subplot per ticker with the
 median marked, saved as a single combined PNG.
 
 Run from project root:
-    python3 files/plot_bbo_spreads.py
-    python3 files/plot_bbo_spreads.py --cache other.pkl --out plots/x.png
-    python3 files/plot_bbo_spreads.py --max-pennies 30
+    python3 source/plot_bbo_spreads.py
+    python3 source/plot_bbo_spreads.py --cache other.pkl --out plots/x.png
+    python3 source/plot_bbo_spreads.py --max-pennies 30
 """
 
 import argparse
