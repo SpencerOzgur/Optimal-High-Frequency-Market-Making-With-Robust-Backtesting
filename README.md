@@ -17,6 +17,7 @@ Based on: *Optimal High-Frequency Trading in a Pro-Rata Microstructure with Pred
 │   ├── helpers.py                  # Summary tables, fill analysis, xlsx export
 │   ├── analysis.py                 # All plots (figures 1–5 + diagnostics)
 │   ├── realized_vol_strategy.py    # Rolling realized vol extension of A-S
+│   ├── calibrate_params.py         # Calibrate kappa, A, b from prior week
 │   └── data/                       # Cached pkl files (gitignored)
 │       ├── raw_data.pkl
 │       ├── raw_data_calib.pkl
@@ -24,10 +25,8 @@ Based on: *Optimal High-Frequency Trading in a Pro-Rata Microstructure with Pred
 │
 ├── scripts/                        # Entry-point runners
 │   ├── run_with_wrds.py            # Main empirical run (TAQ replay)
-│   ├── poisson_simulator.py        # Synthetic run (paper-style Poisson fills)
-│   ├── realized_vol_strategy.py    # Realized vol experiment runner
-│   ├── run_test_cases.py           # Unit tests
-│   └── calibrate_params.py         # Calibrate kappa, A, b from prior week
+│   ├── run_synthetic.py            # Synthetic run (paper-style Poisson fills)
+│   ├── run_realized_vol.py         # Realized vol experiment runner
 │
 ├── plots/                          # Generated figures (gitignored)
 │   ├── wrds/                       # Figures from TAQ replay run
