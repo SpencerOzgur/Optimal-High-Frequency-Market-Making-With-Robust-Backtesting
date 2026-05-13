@@ -33,7 +33,7 @@ DATES = [
 # Risk aversion parameter tuned per asset
 GAMMA_PARAMS = {
     'AAPL': .01,
-    'AMZN': .015,
+    'AMZN': .01,
     'GE':   .01,
     'IVV':  .01,
     'M':    .01,
