@@ -1,5 +1,23 @@
 # Optimal High-Frequency Market Making With Robust Backtesting
 
+<p align="left">
+  <img src="https://img.shields.io/badge/Python-3.10+-blue?style=for-the-badge&logo=python&logoColor=white">
+  <img src="https://img.shields.io/badge/Status-Research%20Framework-yellow?style=for-the-badge">
+  <img src="https://img.shields.io/badge/Focus-Market%20Microstructure-black?style=for-the-badge">
+  <img src="https://img.shields.io/badge/Data-WRDS%20TAQ-darkred?style=for-the-badge">
+  <img src="https://img.shields.io/badge/Model-Avellaneda--Stoikov-darkgreen?style=for-the-badge">
+  <img src="https://img.shields.io/badge/Backtesting-Replay%20Simulation-purple?style=for-the-badge">
+</p>
+
+<p align="left">
+  <img src="https://img.shields.io/badge/NumPy-013243?style=flat-square&logo=numpy&logoColor=white">
+  <img src="https://img.shields.io/badge/Pandas-150458?style=flat-square&logo=pandas&logoColor=white">
+  <img src="https://img.shields.io/badge/Matplotlib-11557c?style=flat-square">
+  <img src="https://img.shields.io/badge/SciPy-8CAAE6?style=flat-square&logo=scipy&logoColor=white">
+  <img src="https://img.shields.io/badge/Quantitative%20Finance-black?style=flat-square">
+  <img src="https://img.shields.io/badge/Algorithmic%20Trading-black?style=flat-square">
+</p>
+
 Implementation and empirical evaluation of the Avellaneda-Stoikov (2008) market making model, extended with a dynamic inventory control framework and tested against real TAQ data from WRDS.
 
 Based on: *Optimal High-Frequency Trading in a Pro-Rata Microstructure with Predictive Information* (Stanford, 2018).
@@ -69,8 +87,8 @@ Loads one week of TAQ data for AAPL, AMZN, GE, IVV, and M. Runs the optimal A-S 
 ### Synthetic run (paper-style Poisson simulator)
 
 ```bash
-python scripts/poisson_simulator.py
-python scripts/poisson_simulator.py --days 100 --seed 42
+python scripts/run_synthetic.py
+python scripts/run_synthetic.py --days 100 --seed 42
 ```
 
 Replicates the Stanford paper's simulation environment using arithmetic Brownian motion for mid-price paths and Poisson-Gamma fills. Both strategies run on identical price paths per day for a fair comparison.
@@ -92,14 +110,6 @@ python scripts/calibrate_params.py --no-cache   # force WRDS refetch
 ```
 
 Fits `kappa`, `A`, and `b` from the prior week's TAQ data. Copy the printed values into `KAPPA_PARAMS`, `A_PARAMS`, and `B_PARAMS` in `run_with_wrds.py`.
-
-### Unit tests
-
-```bash
-python scripts/run_test_cases.py
-```
-
-Tests the A-S math, inventory model toggles, fill logic (both queue models), and fill analysis helpers.
 
 ---
 
