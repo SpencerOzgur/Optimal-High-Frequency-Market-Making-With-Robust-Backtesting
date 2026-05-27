@@ -20,7 +20,7 @@
 
 Implementation and empirical evaluation of the Avellaneda-Stoikov (2008) market making model, extended with a dynamic inventory control framework and tested against real TAQ data from WRDS.
 
-Based on: *Optimal High-Frequency Trading in a Pro-Rata Microstructure with Predictive Information* (Stanford, 2018).
+Based on: *Optimal High-Frequency Market Making* (Stanford, 2018).
 
 ---
 
@@ -225,4 +225,4 @@ Each ticker is filtered to its primary venue in both the quote and trade streams
 
 - Avellaneda, M. and Stoikov, S. (2008). *High-frequency trading in a limit order book*. Quantitative Finance, 8(3), 217–224.
 - Cartea, Á., Jaimungal, S., and Penalva, J. (2015). *Algorithmic and High-Frequency Trading*. Cambridge University Press.
-- Ho, T. and Stoll, H. (1981). *Optimal dealer pricing under transactions and return uncertainty*. Journal of Financial Economics, 9(1), 47–73.
+- Fushimi, T., Rojas, C.G., and Herman, M. (2018). *Optimal High-Frequency Market Making*. Stanford University.
