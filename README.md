@@ -1,7 +1,7 @@
 # Optimal High-Frequency Market Making With Robust Backtesting
 
 <p align="center">
-  <img src="docs/IEOR_logo.png" width="85%">
+  <img src="docs/IEOR_logo.jpg" width="85%">
 </p>
 
 <p align="left">
