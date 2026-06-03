@@ -1,0 +1,1001 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Optimal HFT Market Making — Columbia IEOR 4733</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,500;1,300&family=EB+Garamond:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-chtml.min.js"></script>
+<style>
+:root {
+  --columbia: #003087;
+  --columbia-light: #1a4ea0;
+  --columbia-pale: #e8eef7;
+  --gold: #8c6a00;
+  --gold-light: #b88a00;
+  --ink: #0d0d0c;
+  --ink-mid: #3a3a38;
+  --ink-muted: #6b6b68;
+  --ink-faint: #a8a6a0;
+  --paper: #fafaf8;
+  --paper-warm: #f2f0ea;
+  --rule: #dddbd4;
+  --rule-light: #eceae4;
+  --mono: 'IBM Plex Mono', monospace;
+  --serif: 'EB Garamond', serif;
+  --sans: 'IBM Plex Sans', sans-serif;
+  --grid: #e8e6e040;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { background: var(--paper); color: var(--ink); font-family: var(--sans); }
+
+body { max-width: 900px; margin: 0 auto; padding: 0 2rem 6rem; }
+
+/* ── GRID BACKGROUND ── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+* { position: relative; z-index: 1; }
+
+/* ── TOP BAR ── */
+.topbar {
+  background: var(--columbia);
+  margin: 0 -2rem;
+  padding: 0.5rem 2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.topbar-left {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: rgba(255,255,255,0.6);
+  text-transform: uppercase;
+}
+
+.topbar-right {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: rgba(255,255,255,0.5);
+}
+
+/* ── HEADER ── */
+header {
+  padding: 3.5rem 0 2.5rem;
+  border-bottom: 1px solid var(--rule);
+  margin-bottom: 3rem;
+}
+
+.course-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--columbia-pale);
+  border: 1px solid var(--columbia);
+  border-radius: 2px;
+  padding: 0.25rem 0.75rem;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--columbia);
+  letter-spacing: 0.06em;
+  margin-bottom: 1.5rem;
+}
+
+.course-tag::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background: var(--columbia);
+  border-radius: 50%;
+}
+
+h1 {
+  font-family: var(--serif);
+  font-size: clamp(2rem, 5vw, 3.2rem);
+  font-weight: 400;
+  line-height: 1.12;
+  color: var(--ink);
+  margin-bottom: 0.4rem;
+  letter-spacing: -0.01em;
+}
+
+h1 .italic { font-style: italic; color: var(--columbia-light); }
+
+.subtitle-line {
+  font-family: var(--serif);
+  font-size: 1.1rem;
+  font-style: italic;
+  color: var(--ink-muted);
+  margin-bottom: 1.75rem;
+}
+
+.authors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.author {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-mid);
+}
+
+.author span {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.meta-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1.5rem;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 0.4rem 0.85rem;
+  border-radius: 2px;
+  text-decoration: none;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  border: none;
+  background: none;
+}
+
+.btn-primary {
+  background: var(--columbia);
+  color: white;
+}
+
+.btn-primary:hover { background: var(--columbia-light); }
+
+.btn-outline {
+  border: 1px solid var(--columbia);
+  color: var(--columbia);
+}
+
+.btn-outline:hover { background: var(--columbia-pale); }
+
+.btn-gold {
+  background: var(--gold);
+  color: white;
+}
+
+.btn-gold:hover { background: var(--gold-light); }
+
+/* ── SECTION STRUCTURE ── */
+section { margin-bottom: 3.5rem; }
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.section-num {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--columbia);
+  background: var(--columbia-pale);
+  padding: 0.15rem 0.4rem;
+  border-radius: 2px;
+  letter-spacing: 0.08em;
+}
+
+h2 {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  font-weight: 400;
+}
+
+p {
+  font-size: 15px;
+  line-height: 1.8;
+  color: var(--ink-muted);
+  margin-bottom: 1rem;
+  font-family: var(--sans);
+  font-weight: 300;
+}
+
+p strong { font-weight: 500; color: var(--ink-mid); }
+
+/* ── ABSTRACT BOX ── */
+.abstract {
+  border-left: 3px solid var(--columbia);
+  padding: 1.25rem 1.5rem;
+  background: var(--columbia-pale);
+  margin-bottom: 2rem;
+}
+
+.abstract p { margin-bottom: 0; font-style: italic; color: var(--ink-mid); }
+
+/* ── RESULT CALLOUTS ── */
+.results-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1px;
+  background: var(--rule);
+  border: 1px solid var(--rule);
+  margin-bottom: 1.5rem;
+}
+
+.result-card {
+  background: var(--paper);
+  padding: 1.25rem 1.5rem;
+}
+
+.result-value {
+  font-family: var(--serif);
+  font-size: 2rem;
+  color: var(--columbia);
+  line-height: 1;
+  margin-bottom: 0.35rem;
+}
+
+.result-value.positive { color: #1a6e3a; }
+.result-value.gold { color: var(--gold); }
+
+.result-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1.4;
+}
+
+/* ── MATH ── */
+.math-block {
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--columbia);
+  background: var(--paper-warm);
+  padding: 1.1rem 1.5rem;
+  margin: 1.25rem 0;
+  overflow-x: auto;
+}
+
+.math-tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--columbia);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.math-tag::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--rule);
+}
+
+/* ── CONTRIBUTION TABLE ── */
+.contrib-list { width: 100%; border-collapse: collapse; }
+.contrib-list tr { border-bottom: 1px solid var(--rule-light); }
+.contrib-list tr:last-child { border-bottom: none; }
+.contrib-list td { padding: 0.85rem 0; font-size: 14px; vertical-align: top; }
+.contrib-list td:first-child {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--columbia);
+  width: 40px;
+  padding-right: 1rem;
+  padding-top: 1rem;
+}
+.contrib-list td:nth-child(2) {
+  font-weight: 500;
+  color: var(--ink-mid);
+  font-size: 14px;
+  width: 220px;
+  padding-right: 1.5rem;
+}
+.contrib-list td:last-child { color: var(--ink-muted); font-weight: 300; }
+
+/* ── TICKER GRID ── */
+.ticker-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 1px;
+  background: var(--rule);
+  border: 1px solid var(--rule);
+  margin-bottom: 1rem;
+}
+
+.ticker-card {
+  background: var(--paper);
+  padding: 1rem 0.85rem;
+  text-align: center;
+}
+
+.ticker-sym {
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--columbia);
+  margin-bottom: 0.3rem;
+}
+
+.ticker-detail {
+  font-size: 11px;
+  color: var(--ink-faint);
+  line-height: 1.5;
+}
+
+/* ── ALGORITHM BOX ── */
+.algo-box {
+  border: 1px solid var(--rule);
+  background: var(--paper-warm);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--ink-mid);
+  padding: 1.25rem 1.5rem;
+  margin: 1.25rem 0;
+}
+
+.algo-box .algo-title {
+  font-size: 11px;
+  color: var(--columbia);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.algo-box .indent-1 { padding-left: 1.5rem; }
+.algo-box .indent-2 { padding-left: 3rem; }
+.algo-box .indent-3 { padding-left: 4.5rem; }
+.algo-box .kw { color: var(--columbia); font-weight: 500; }
+.algo-box .comment { color: var(--ink-faint); }
+
+/* ── PIPELINE ── */
+.pipeline { border: 1px solid var(--rule); }
+.pipeline-step {
+  display: flex;
+  gap: 1.25rem;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--rule-light);
+}
+.pipeline-step:last-child { border-bottom: none; }
+.step-idx {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: white;
+  background: var(--columbia);
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 2px;
+  margin-top: 1px;
+}
+.step-body strong { font-size: 14px; font-weight: 500; color: var(--ink-mid); display: block; margin-bottom: 0.2rem; }
+.step-body span { font-size: 13px; color: var(--ink-muted); font-weight: 300; }
+
+/* ── PLOTS ── */
+.plot-section-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--columbia);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin: 2rem 0 0.75rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--rule-light);
+}
+
+.plot-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--rule);
+  border: 1px solid var(--rule);
+  margin-bottom: 1px;
+}
+
+.plot-grid-1 {
+  border: 1px solid var(--rule);
+  margin-bottom: 1px;
+  background: var(--rule);
+}
+
+.plot-card {
+  background: var(--paper-warm);
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.plot-card img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.plot-caption {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+  margin-top: 0.5rem;
+  line-height: 1.5;
+}
+
+.plot-caption strong {
+  color: var(--columbia);
+  font-weight: 500;
+}
+
+/* ── FUTURE WORK ── */
+.future-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1px;
+  background: var(--rule);
+  border: 1px solid var(--rule);
+}
+
+.future-card {
+  background: var(--paper);
+  padding: 1.1rem 1.25rem;
+}
+
+.future-card strong {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--columbia);
+  letter-spacing: 0.06em;
+  display: block;
+  margin-bottom: 0.4rem;
+  text-transform: uppercase;
+}
+
+.future-card p {
+  font-size: 13px;
+  margin-bottom: 0;
+  line-height: 1.6;
+}
+
+/* ── REFERENCES ── */
+.ref-list { list-style: none; }
+.ref-list li {
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--rule-light);
+  display: flex;
+  gap: 1rem;
+  font-size: 14px;
+  color: var(--ink-muted);
+  font-weight: 300;
+}
+.ref-list li:last-child { border-bottom: none; }
+.ref-tag {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--columbia);
+  flex-shrink: 0;
+  width: 60px;
+}
+
+/* ── FOOTER ── */
+footer {
+  border-top: 1px solid var(--rule);
+  padding-top: 1.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.footer-left { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); }
+.footer-right { display: flex; gap: 0.5rem; }
+
+/* ── PDF MODAL ── */
+#pdf-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,15,0.7);
+  z-index: 1000;
+  align-items: center;
+  justify-content: center;
+}
+
+#pdf-overlay.open { display: flex; }
+
+.pdf-modal {
+  background: var(--paper);
+  width: 90vw;
+  max-width: 860px;
+  height: 85vh;
+  border: 1px solid var(--rule);
+  display: flex;
+  flex-direction: column;
+}
+
+.pdf-modal-header {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--rule);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--columbia);
+}
+
+.pdf-modal-header span {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: white;
+  letter-spacing: 0.06em;
+}
+
+.pdf-modal-close {
+  background: none;
+  border: none;
+  color: white;
+  font-family: var(--mono);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 0.25rem;
+}
+
+.pdf-modal iframe {
+  flex: 1;
+  border: none;
+  width: 100%;
+}
+
+@media (max-width: 600px) {
+  body { padding: 0 1.25rem 4rem; }
+  .ticker-grid { grid-template-columns: repeat(3, 1fr); }
+  .contrib-list td:nth-child(2) { width: 140px; }
+  .plot-grid-2 { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="topbar-left">Columbia University · IEOR 4733 · Algorithmic Trading</span>
+  <span class="topbar-right">May 12, 2026</span>
+</div>
+
+<header>
+  <div class="course-tag">IEOR 4733 &nbsp;·&nbsp; Final Project</div>
+  <h1>Optimal <span class="italic">High-Frequency</span><br>Market Making</h1>
+  <div class="subtitle-line">with Robust Backtesting on WRDS TAQ Data</div>
+
+  <div class="authors">
+    <div class="author">Garrett Naples <span>· gn2411</span></div>
+    <div class="author">Dan Niedfeldt <span>· dn2648</span></div>
+    <div class="author">Spencer Ozgur <span>· so2770</span></div>
+    <div class="author">Ben Zenker <span>· bhz2110</span></div>
+  </div>
+
+  <div class="meta-links">
+    <a class="btn btn-primary" href="https://github.com/SpencerOzgur/Optimal-High-Frequency-Market-Making-With-Robust-Backtesting" target="_blank">
+      ↗ GitHub Repo
+    </a>
+    <button class="btn btn-gold" onclick="document.getElementById('pdf-overlay').classList.add('open')">
+      ↓ Read Writeup PDF
+    </button>
+    <a class="btn btn-outline" href="https://www.linkedin.com/in/spencerozgur/" target="_blank">
+      LinkedIn
+    </a>
+  </div>
+</header>
+
+<section>
+  <div class="section-header">
+    <span class="section-num">§0</span>
+    <h2>Abstract</h2>
+  </div>
+  <div class="abstract">
+    <p>
+      We replicate and extend the Avellaneda-Stoikov (2008) market making model and its Stanford adaptation
+      (Fushimi, Rojas &amp; Herman, 2018), introducing a proprietary event-driven backtester calibrated on real
+      WRDS TAQ data across five equities. Our key contributions are independent parameter calibration (κ via
+      exponential regression, σ historically, γ = 0.01), a dual queue-priority model, and a rolling realized
+      volatility extension. The optimal A-S strategy improves on PnL over the NBBO baseline across all five
+      tickers while achieving significantly tighter end-of-day inventory control.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="section-header">
+    <span class="section-num">§1</span>
+    <h2>Key Results</h2>
+  </div>
+  <div class="results-grid">
+    <div class="result-card">
+      <div class="result-value gold">5 / 5</div>
+      <div class="result-label">Tickers with optimal PnL improvement over baseline</div>
+    </div>
+    <div class="result-card">
+      <div class="result-value positive">↓ σ</div>
+      <div class="result-label">Inventory std. dev. — sharply reduced vs. baseline</div>
+    </div>
+    <div class="result-card">
+      <div class="result-value">0.942</div>
+      <div class="result-label">R² on κ-regression for AAPL (OLS fit)</div>
+    </div>
+    <div class="result-card">
+      <div class="result-value">2</div>
+      <div class="result-label">Queue models — front-of-queue and back-of-queue</div>
+    </div>
+  </div>
+  <p>
+    The spread decays linearly from market open to close as predicted by the model. Final inventory distributions
+    are significantly more concentrated around zero under optimal control than baseline — a more pronounced
+    improvement than seen in either the original A-S paper or the Stanford modification.
+    Notably, the model was correctly calibrated to market open/close spreads across most tickers
+    without tuning any parameters beyond the stated methodology.
+  </p>
+</section>
+
+<section>
+  <div class="section-header">
+    <span class="section-num">§2</span>
+    <h2>Model — Avellaneda-Stoikov (2008)</h2>
+  </div>
+  <p>The optimal market maker posts bid and ask quotes symmetric around the <strong>indifference price</strong> — the mid at which the agent is indifferent between buying and selling given current inventory.</p>
+
+  <div class="math-block">
+    <div class="math-tag">Indifference price</div>
+    \[ r(s,t) = s - q\gamma\sigma^2(T-t) \]
+  </div>
+
+  <div class="math-block">
+    <div class="math-tag">Optimal bid-ask spread</div>
+    \[ \delta^a + \delta^b = \gamma\sigma^2(T-t) + \frac{2}{\gamma}\ln\!\left(1 + \frac{\gamma}{\kappa}\right) \]
+  </div>
+
+  <p>The spread decays linearly from open to close. Parameters σ and κ are calibrated empirically; γ = 0.01 follows the original A-S recommendation rather than being tuned to market spreads — avoiding the identification problem present in the Stanford paper.</p>
+
+  <div class="math-block">
+    <div class="math-tag">Poisson order flow intensity</div>
+    \[ \lambda(\delta) = A e^{-\kappa\delta}, \qquad \kappa \text{ estimated via OLS: } \log\lambda(\delta) = \log A - \kappa\delta \]
+  </div>
+</section>
+
+<section>
+  <div class="section-header">
+    <span class="section-num">§3</span>
+    <h2>Inventory Control</h2>
+  </div>
+  <p>Order sizes are adjusted exponentially with inventory, keeping the market maker quoting at all times while naturally reducing directional exposure as positions accumulate.</p>
+
+  <div class="math-block">
+    <div class="math-tag">Exponential sizing function</div>
+    \[
+      \phi^\text{bid}_t =
+      \begin{cases}
+        \phi^\text{max}_t & q_t < 0 \\
+        \phi^\text{max}_t \cdot e^{-\eta q_t} & q_t > 0
+      \end{cases}
+      \qquad
+      \phi^\text{ask}_t =
+      \begin{cases}
+        \phi^\text{max}_t & q_t > 0 \\
+        \phi^\text{max}_t \cdot e^{-\eta q_t} & q_t < 0
+      \end{cases}
+    \]
+  </div>
+  <p>Default parameters: φ<sup>max</sup> = 100 shares, η = 0.005. This formulation is strictly preferable to hard position limits, which force the agent to stop quoting entirely once a threshold is hit.</p>
+</section>
+
+<section>
+  <div class="section-header">
+    <span class="section-num">§4</span>
+    <h2>Market Making Algorithm</h2>
+  </div>
+  <p>The execution logic follows the Stanford paper's algorithm structure, adapted for the WRDS TAQ replay environment:</p>
+  <div class="algo-box">
+    <div class="algo-title">Algorithm 1 — Market Making Loop</div>
+    <div><span class="kw">while</span> current_time &lt; end_time <span class="kw">do</span></div>
+    <div class="indent-1"><span class="kw">if</span> no orders in book <span class="kw">then</span></div>
+    <div class="indent-2">Quote bid and ask prices</div>
+    <div class="indent-1"><span class="kw">else if</span> 1 order in book <span class="kw">then</span></div>
+    <div class="indent-2"><span class="kw">if</span> current_time − execution_time &gt; waiting_time <span class="kw">then</span></div>
+    <div class="indent-3">Cancel outstanding order; quote new bid and ask</div>
+    <div class="indent-2"><span class="kw">else</span> Wait</div>
+    <div class="indent-1"><span class="kw">else if</span> 2 orders in book <span class="kw">then</span></div>
+    <div class="indent-2"><span class="kw">if</span> current_time − quote_time &gt; update_time <span class="kw">then</span></div>
+    <div class="indent-3">Cancel both orders; quote new bid and ask</div>
+    <div class="indent-2"><span class="kw">else</span> Wait</div>
+    <div><span class="kw">end</span></div>
+  </div>
+</section>
+
+<section>
+  <div class="section-header">
+    <span class="section-num">§5</span>
+    <h2>Our Contributions</h2>
+  </div>
+  <table class="contrib-list">
+    <tr>
+      <td>01</td>
+      <td>Proprietary backtester</td>
+      <td>Event-driven replay on WRDS NBBO and trade tape. Mixes Poisson order flow (inside NBBO) with historical market flow (on/outside NBBO). Supports front-of-queue and back-of-queue priority toggling.</td>
+    </tr>
+    <tr>
+      <td>02</td>
+      <td>Calibrated κ</td>
+      <td>Exponential regression of fill frequency on distance from mid, fit independently per ticker. R² = 0.942 on AAPL. The Stanford paper uses a single unmotivated fixed κ.</td>
+    </tr>
+    <tr>
+      <td>03</td>
+      <td>True parameter estimation</td>
+      <td>σ estimated from prior-week historical volatility; γ = 0.01 (A-S original). The Stanford paper calibrates σ and γ to other market participants' open/close spreads — effectively cheating.</td>
+    </tr>
+    <tr>
+      <td>04</td>
+      <td>Rolling σ extension</td>
+      <td>10-minute rolling realized variance replaces fixed σ², allowing the spread to widen during volatile intraday periods. Infrastructure built; excluded from main results due to sensitivity.</td>
+    </tr>
+  </table>
+</section>
+
+<section>
+  <div class="section-header">
+    <span class="section-num">§6</span>
+    <h2>Backtesting Pipeline</h2>
+  </div>
+  <div class="pipeline">
+    <div class="pipeline-step">
+      <div class="step-idx">1</div>
+      <div class="step-body">
+        <strong>Data loading</strong>
+        <span>Fetch TAQ quote and trade data from WRDS. Calibration week: Jun 5–9, 2017. Evaluation week: Jun 12–16, 2017. Cache to disk for subsequent runs.</span>
+      </div>
+    </div>
+    <div class="pipeline-step">
+      <div class="step-idx">2</div>
+      <div class="step-body">
+        <strong>Parameter calibration</strong>
+        <span>Fit κ per ticker via OLS regression on log fill frequency. Estimate σ from prior-week daily volatility. Set γ = 0.01.</span>
+      </div>
+    </div>
+    <div class="pipeline-step">
+      <div class="step-idx">3</div>
+      <div class="step-body">
+        <strong>Event-driven simulation</strong>
+        <span>Replay TAQ trades second-by-second. Post optimal quotes, check fills against queue model, update inventory and P&L.</span>
+      </div>
+    </div>
+    <div class="pipeline-step">
+      <div class="step-idx">4</div>
+      <div class="step-body">
+        <strong>Queue model comparison</strong>
+        <span>Run both front-of-queue and back-of-queue models simultaneously. Back-of-queue is worst-case; both models remain profitable.</span>
+      </div>
+    </div>
+    <div class="pipeline-step">
+      <div class="step-idx">5</div>
+      <div class="step-body">
+        <strong>Benchmarking</strong>
+        <span>Run NBBO passive baseline on identical price paths. Compare terminal P&L distributions, inventory density, spread capture rate, fill-per-quote rate.</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="section-header">
+    <span class="section-num">§7</span>
+    <h2>Evaluation Universe</h2>
+  </div>
+  <div class="ticker-grid">
+    <div class="ticker-card">
+      <div class="ticker-sym">AAPL</div>
+      <div class="ticker-detail">NASDAQ (Q)<br>Penny-spread<br>reference</div>
+    </div>
+    <div class="ticker-card">
+      <div class="ticker-sym">AMZN</div>
+      <div class="ticker-detail">NASDAQ (Q)<br>Wide spread<br>flat model</div>
+    </div>
+    <div class="ticker-card">
+      <div class="ticker-sym">GE</div>
+      <div class="ticker-detail">Cboe BYX (Y)</div>
+    </div>
+    <div class="ticker-card">
+      <div class="ticker-sym">IVV</div>
+      <div class="ticker-detail">NYSE Arca (P)<br>ETF</div>
+    </div>
+    <div class="ticker-card">
+      <div class="ticker-sym">M</div>
+      <div class="ticker-detail">NASDAQ (T)<br>NYSE-listed</div>
+    </div>
+  </div>
+  <p>Each ticker is filtered to its primary venue in both quote and trade streams to avoid cross-venue contamination. The Poisson effective_mu is scaled inversely with open_spread so wide-spread tickers receive realistic fill probabilities.</p>
+</section>
+
+<section>
+  <div class="section-header">
+    <span class="section-num">§8</span>
+    <h2>Figures</h2>
+  </div>
+
+  <div class="plot-section-label">Model diagnostics — order sizing &amp; intensity</div>
+  <div class="plot-grid-2">
+    <div class="plot-card">
+      <img src="plots/wrds/fig1_order_size.png" alt="Dynamic order size function vs inventory">
+      <div class="plot-caption"><strong>Fig 1</strong> — Dynamic order size function vs. inventory position. Exponential decay reduces quote size as directional exposure accumulates.</div>
+    </div>
+    <div class="plot-card">
+      <img src="plots/wrds/fig2_intensity.png" alt="Poisson fill intensity">
+      <div class="plot-caption"><strong>Fig 2</strong> — Poisson fill intensity λ(δ) as a function of distance from mid. Time component (bathtub) and depth component shown separately.</div>
+    </div>
+  </div>
+
+  <div class="plot-section-label">κ calibration — AAPL exponential regression</div>
+  <div class="plot-grid-1">
+    <div class="plot-card">
+      <img src="plots/wrds/fig_kappa_regression_AAPL.png" alt="Kappa regression AAPL">
+      <div class="plot-caption"><strong>Fig 3</strong> — OLS fit of log fill rate on depth from mid for AAPL. κ = 81.81, R² = 0.942. Each ticker is calibrated independently from prior-week TAQ data.</div>
+    </div>
+  </div>
+
+  <div class="plot-section-label">Spread dynamics — AAPL (penny spread) vs. AMZN (wide spread)</div>
+  <div class="plot-grid-2">
+    <div class="plot-card">
+      <img src="plots/wrds/fig3_spreads_AAPL.png" alt="AAPL spread dynamics">
+      <div class="plot-caption"><strong>Fig 4a</strong> — AAPL: market spread vs. optimal quoted spread. Linear decay from open to close matches model prediction.</div>
+    </div>
+    <div class="plot-card">
+      <img src="plots/wrds/fig3_spreads_AMZN.png" alt="AMZN spread dynamics">
+      <div class="plot-caption"><strong>Fig 4b</strong> — AMZN: wide spread triggers the flat-model fallback (A = 0). Quoted spread tracks market spread without the linear decay.</div>
+    </div>
+  </div>
+
+  <div class="plot-section-label">Intraday quote dynamics — AAPL mid-price, indifference price, bid/ask</div>
+  <div class="plot-grid-1">
+    <div class="plot-card">
+      <img src="plots/wrds/fig_quote_dynamics_AAPL.png" alt="AAPL quote dynamics">
+      <div class="plot-caption"><strong>Fig 5</strong> — AAPL intraday: mid-price (black), indifference price (green), bid and ask quotes. The indifference price tracks inventory drift; quotes remain symmetric around it.</div>
+    </div>
+  </div>
+
+  <div class="plot-section-label">P&amp;L and inventory control — AAPL (front-of-queue)</div>
+  <div class="plot-grid-1">
+    <div class="plot-card">
+      <img src="plots/wrds/fig4_pnl_inventory_AAPL.png" alt="AAPL PnL and inventory">
+      <div class="plot-caption"><strong>Fig 6</strong> — AAPL: cumulative P&amp;L (optimal vs. baseline) and end-of-day inventory density across all 5 trading days. Optimal strategy concentrates inventory near zero with marginal P&amp;L improvement.</div>
+    </div>
+  </div>
+
+  <div class="plot-section-label">BBO spread distribution across all tickers</div>
+  <div class="plot-grid-1">
+    <div class="plot-card">
+      <img src="plots/bbo_spread_distribution.png" alt="BBO spread distribution">
+      <div class="plot-caption"><strong>Fig 7</strong> — NBBO spread distribution in dollar terms per ticker. AMZN's wide spread distribution motivates the flat-model treatment; AAPL, GE, IVV, and M cluster near penny spreads.</div>
+    </div>
+  </div>
+
+  <div class="plot-section-label">Realized volatility extension — P&amp;L summary across all tickers</div>
+  <div class="plot-grid-1">
+    <div class="plot-card">
+      <img src="plots/wrds/rv_pnl_summary.png" alt="RV PnL summary">
+      <div class="plot-caption"><strong>Fig 8</strong> — Average daily P&amp;L: fixed-vol A-S vs. realized-vol A-S vs. NBBO baseline, across all five tickers. RV extension shows marginal improvement on volatile names.</div>
+    </div>
+  </div>
+
+  <div class="plot-section-label">Spread comparison — AAPL front-of-queue vs. back-of-queue</div>
+  <div class="plot-grid-2">
+    <div class="plot-card">
+      <img src="plots/wrds/fig_spread_comparison_AAPL.png" alt="AAPL spread comparison front">
+      <div class="plot-caption"><strong>Fig 9a</strong> — AAPL front-of-queue: quoted spread vs. NBBO with rolling 5-min difference. Optimal spread is wider than market early in the day, converging by close.</div>
+    </div>
+    <div class="plot-card">
+      <img src="plots/wrds_back/fig_spread_comparison_AAPL.png" alt="AAPL spread comparison back">
+      <div class="plot-caption"><strong>Fig 9b</strong> — AAPL back-of-queue (worst-case): same analysis under back-of-queue priority. Strategy remains profitable despite reduced fill probability.</div>
+    </div>
+  </div>
+
+</section>
+
+<section>
+  <div class="section-header">
+    <span class="section-num">§9</span>
+    <h2>Future Work</h2>
+  </div>
+  <div class="future-grid">
+    <div class="future-card">
+      <strong>L2 / L3 data</strong>
+      <p>Incorporate DataBento or LOBSTER order book data for direct queue position estimation.</p>
+    </div>
+    <div class="future-card">
+      <strong>Order book imbalance</strong>
+      <p>Use OBI = (V<sub>bid</sub> − V<sub>ask</sub>) / (V<sub>bid</sub> + V<sub>ask</sub>) as an inventory control signal.</p>
+    </div>
+    <div class="future-card">
+      <strong>Rolling calibration</strong>
+      <p>Adapt σ and κ intraday using rolling windows to capture regime changes within a session.</p>
+    </div>
+    <div class="future-card">
+      <strong>Alternative algorithms</strong>
+      <p>Explore alternative execution algorithms beyond the Stanford bathtub time-modifier framework.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="section-header">
+    <span class="section-num">§10</span>
+    <h2>References</h2>
+  </div>
+  <ul class="ref-list">
+    <li>
+      <span class="ref-tag">A-S 2008</span>
+      <span>Avellaneda, M. &amp; Stoikov, S. High-frequency trading in a limit order book. <em>Quantitative Finance</em>, 8(3), 217–224.</span>
+    </li>
+    <li>
+      <span class="ref-tag">CJP 2015</span>
+      <span>Cartea, Á., Jaimungal, S. &amp; Penalva, J. <em>Algorithmic and High-Frequency Trading</em>. Cambridge University Press.</span>
+    </li>
+    <li>
+      <span class="ref-tag">FRH 2018</span>
+      <span>Fushimi, T., Gonzalez Rojas, C. G. &amp; Herman, M. Optimal High-Frequency Market Making. Stanford University.</span>
+    </li>
+  </ul>
+</section>
+
+<footer>
+  <div class="footer-left">
+    Columbia University · IEOR 4733 · May 2026<br>
+    Naples · Niedfeldt · Ozgur · Zenker
+  </div>
+  <div class="footer-right">
+    <a class="btn btn-primary" href="https://github.com/SpencerOzgur/Optimal-High-Frequency-Market-Making-With-Robust-Backtesting" target="_blank">GitHub →</a>
+  </div>
+</footer>
+
+<!-- PDF MODAL -->
+<div id="pdf-overlay" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="pdf-modal">
+    <div class="pdf-modal-header">
+      <span>IEOR 4733 Final Writeup — Naples, Niedfeldt, Ozgur, Zenker</span>
+      <button class="pdf-modal-close" onclick="document.getElementById('pdf-overlay').classList.remove('open')">✕</button>
+    </div>
+    <iframe src="IEOR_4733_Final_Writeup.pdf"></iframe>
+  </div>
+</div>
+
+</body>
+</html>
