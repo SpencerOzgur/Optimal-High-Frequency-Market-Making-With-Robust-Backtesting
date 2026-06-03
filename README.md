@@ -1,5 +1,9 @@
 # Optimal High-Frequency Market Making With Robust Backtesting
 
+<p align="center">
+  <img src="docs/IEOR_logo.png" width="85%">
+</p>
+
 <p align="left">
   <img src="https://img.shields.io/badge/Python-3.10+-blue?style=for-the-badge&logo=python&logoColor=white">
   <img src="https://img.shields.io/badge/Status-Research%20Framework-yellow?style=for-the-badge">
